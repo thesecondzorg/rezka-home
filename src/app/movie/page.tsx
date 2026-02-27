@@ -528,7 +528,7 @@ function MoviePageContent() {
                     )}
 
                     {/* Player Container */}
-                    <div className="w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800 relative aspect-video flex items-center justify-center group">
+                    <div className="w-full bg-black mb-8 rounded-2xl overflow-hidden shadow-2xl border border-gray-800 relative aspect-video flex items-center justify-center group">
                         {/* Video element is ALWAYS mounted to preserve fullscreen */}
                         <video
                             ref={videoRef}
