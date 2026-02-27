@@ -529,97 +529,100 @@ function MoviePageContent() {
 
                     {/* Player Container */}
                     <div className="w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800 relative aspect-video flex items-center justify-center group">
-                        {streamLoading ? (
-                            <div className="flex flex-col items-center">
+                        {/* Video element is ALWAYS mounted to preserve fullscreen */}
+                        <video
+                            ref={videoRef}
+                            controls
+                            autoPlay
+                            onEnded={handleVideoEnded}
+                            onTimeUpdate={handleTimeUpdate}
+                            className="w-full h-full outline-none"
+                            src={!streamHlsUrl ? streamUrl : undefined}
+                            controlsList="nodownload"
+                            poster={details.poster}
+                        >
+                            Your browser does not support the video tag.
+                        </video>
+
+                        {/* Loading Overlay (shown on top of video) */}
+                        {streamLoading && (
+                            <div className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center">
                                 <div className="w-12 h-12 border-4 border-gray-800 border-t-red-500 rounded-full animate-spin mb-4"></div>
                                 <p className="text-gray-400 animate-pulse">Loading Stream...</p>
                             </div>
-                        ) : streamUrl ? (
-                            <>
-                                <video
-                                    ref={videoRef}
-                                    controls
-                                    autoPlay
-                                    onEnded={handleVideoEnded}
-                                    onTimeUpdate={handleTimeUpdate}
-                                    className="w-full h-full outline-none"
-                                    src={!streamHlsUrl ? streamUrl : undefined}
-                                    controlsList="nodownload"
-                                    poster={details.poster}
-                                >
-                                    Your browser does not support the video tag.
-                                </video>
+                        )}
 
-                                {/* Next Episode Overlay Button */}
-                                {showNextEpisodeBtn && details?.isSeries && (
-                                    <button
-                                        onClick={handleVideoEnded}
-                                        className="absolute bottom-20 right-8 z-30 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold shadow-[0_0_20px_rgba(220,38,38,0.5)] transition-all flex items-center gap-2 group animate-in slide-in-from-right-8 fade-in duration-300"
-                                    >
-                                        Next Episode
-                                        <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
-                                    </button>
-                                )}
-
-                                {/* Quality Selector Overlay */}
-                                {streams.length > 1 && (
-                                    <div className="absolute top-4 right-4 z-20 flex flex-col items-end">
-                                        <button
-                                            onClick={() => setShowQualities(!showQualities)}
-                                            className="bg-black/70 hover:bg-black/90 text-white backdrop-blur-md px-3 py-1.5 rounded-lg text-sm font-semibold border border-white/10 transition-all shadow-lg flex items-center gap-2"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                            {currentQuality}
-                                        </button>
-
-                                        {showQualities && (
-                                            <div className="mt-2 bg-black/90 backdrop-blur-xl border border-gray-700/50 rounded-lg overflow-hidden flex flex-col w-32 shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200">
-                                                {streams.map((s, i) => (
-                                                    <button
-                                                        key={i}
-                                                        onClick={() => handleQualityChange(s)}
-                                                        className={`px-4 py-2 text-sm text-left transition-colors ${currentQuality === s.quality
-                                                            ? 'bg-red-600/20 text-red-400 font-bold border-l-2 border-red-500'
-                                                            : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent hover:border-gray-500'
-                                                            }`}
-                                                    >
-                                                        {s.quality}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </>
-                        ) : (
-                            <div className="relative w-full h-full flex items-center justify-center">
+                        {/* Poster Fallback Overlay (when no stream loaded) */}
+                        {!streamUrl && !streamLoading && (
+                            <div className="absolute inset-0 z-20 flex items-center justify-center">
                                 {details.poster && (
                                     <img src={details.poster} alt="Poster fallback" className="absolute inset-0 w-full h-full object-cover opacity-30" />
                                 )}
                                 <div className="text-gray-300 flex flex-col items-center relative z-10 bg-black/50 p-6 rounded-xl backdrop-blur-sm">
                                     <svg className="w-16 h-16 mb-4 opacity-50" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
-                                    <p className="font-semibold text-lg">Select a translation to watch</p>
+                                    <p>Select a translation to start watching</p>
                                 </div>
                             </div>
                         )}
+
+                        {/* Next Episode Overlay Button */}
+                        {showNextEpisodeBtn && details?.isSeries && (
+                            <button
+                                onClick={handleVideoEnded}
+                                className="absolute bottom-20 right-8 z-30 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold shadow-[0_0_20px_rgba(220,38,38,0.5)] transition-all flex items-center gap-2 group animate-in slide-in-from-right-8 fade-in duration-300"
+                            >
+                                Next Episode
+                                <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                            </button>
+                        )}
+
+                        {/* Quality Selector Overlay */}
+                        {streams.length > 1 && (
+                            <div className="absolute top-4 right-4 z-20 flex flex-col items-end">
+                                <button
+                                    onClick={() => setShowQualities(!showQualities)}
+                                    className="bg-black/70 hover:bg-black/90 text-white backdrop-blur-md px-3 py-1.5 rounded-lg text-sm font-semibold border border-white/10 transition-all shadow-lg flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                    {currentQuality}
+                                </button>
+
+                                {showQualities && (
+                                    <div className="mt-2 bg-black/90 backdrop-blur-xl border border-gray-700/50 rounded-lg overflow-hidden flex flex-col w-32 shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200">
+                                        {streams.map((s, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleQualityChange(s)}
+                                                className={`px-4 py-2 text-sm text-left transition-colors ${currentQuality === s.quality
+                                                    ? 'bg-red-600/20 text-red-400 font-bold border-l-2 border-red-500'
+                                                    : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent hover:border-gray-500'
+                                                    }`}
+                                            >
+                                                {s.quality}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
-                </div>
-            </div>
 
-            {/* Movie details */}
-            <div className="bg-gray-900/30 rounded-2xl border border-gray-800 p-6 md:p-8">
-                <div className="prose prose-invert prose-p:text-gray-300 max-w-none mb-8">
-                    <h2 className="text-xl font-bold text-white mb-4">About this title</h2>
-                    <p className="text-lg leading-relaxed">{details.description}</p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-6 border-t border-gray-800">
-                    {Object.entries(details.info || {}).slice(0, 8).map(([key, value]) => (
-                        <div key={key} className="bg-gray-900/50 p-3 rounded-lg border border-gray-800/50">
-                            <span className="block text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1">{key}</span>
-                            <span className="text-sm text-gray-200">{value as string}</span>
+                    {/* Movie details */}
+                    <div className="bg-gray-900/30 rounded-2xl border border-gray-800 p-6 md:p-8">
+                        <div className="prose prose-invert prose-p:text-gray-300 max-w-none mb-8">
+                            <h2 className="text-xl font-bold text-white mb-4">About this title</h2>
+                            <p className="text-lg leading-relaxed">{details.description}</p>
                         </div>
-                    ))}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-6 border-t border-gray-800">
+                            {Object.entries(details.info || {}).slice(0, 8).map(([key, value]) => (
+                                <div key={key} className="bg-gray-900/50 p-3 rounded-lg border border-gray-800/50">
+                                    <span className="block text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1">{key}</span>
+                                    <span className="text-sm text-gray-200">{value as string}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
