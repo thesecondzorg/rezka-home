@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎬 HDRezka Frontend
+
+A clean, ad-free streaming frontend for HDRezka built with Next.js. Search for movies and TV series, browse details with multiple Ukrainian/Russian audio translations, and watch with adaptive quality — all through a modern dark-themed UI.
+
+## Features
+
+- 🔍 **Search** — Find movies and series by title
+- 🎭 **Multiple translations** — Switch between voice-over tracks (Ukrainian, Russian, etc.)
+- 📺 **Video player** — HLS streaming with adaptive bitrate fallback
+- 📋 **Episode navigation** — Season/episode picker with per-translator episode lists
+- ⏩ **Seamless playback** — Episode switching without leaving fullscreen
+- 💾 **Persistent state** — Playback position, quality, and translator saved between sessions
+- 🚫 **No ads** — Clean, distraction-free viewing
+
+## Prerequisites
+
+- [Node.js](https://nodejs.org/) 18+ (LTS recommended)
+- npm (comes with Node.js)
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# 1. Clone the repository
+git clone https://github.com/thesecondzorg/rezka-home
+cd rezka-home
+
+# 2. Install dependencies
+npm install
+
+# 3. Start the development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# Build for production
+npm run build
 
-## Learn More
+# Start the production server
+npm start
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Project Structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+rezka-home/
+├── src/app/
+│   ├── page.tsx              # Home page with search
+│   ├── movie/page.tsx        # Movie/series player page
+│   ├── layout.tsx            # Root layout (dark theme)
+│   ├── globals.css           # Global styles
+│   └── api/
+│       ├── search/route.ts   # Search proxy → HDRezka search
+│       ├── details/route.ts  # Details proxy → scrapes movie page
+│       └── stream/route.ts   # Stream proxy → fetches video URLs
+├── package.json
+└── README.md
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## How It Works
 
-## Deploy on Vercel
+The app acts as a proxy layer between your browser and HDRezka:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. **Search** (`/api/search`) — Fetches HDRezka's search page and parses results with Cheerio
+2. **Details** (`/api/details`) — Scrapes a movie page for title, poster, translations, seasons, and episodes
+3. **Stream** (`/api/stream`) — Makes AJAX requests to HDRezka's CDN endpoint to get video stream URLs (HLS + MP4)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Your browser never contacts HDRezka directly — all requests go through the Next.js server.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router) |
+| UI | React 19, Tailwind CSS 4 |
+| HTML Parsing | Cheerio |
+| Video | hls.js, native `<video>` |
+| Language | TypeScript |
+
+## License
+
+This project is for personal/educational use only.
