@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Hls from 'hls.js';
 
 
-export default function MoviePage() {
+function MoviePageContent() {
     const searchParams = useSearchParams();
     const url = searchParams.get('url');
 
@@ -14,6 +15,7 @@ export default function MoviePage() {
     const [error, setError] = useState('');
 
     const [streamUrl, setStreamUrl] = useState('');
+    const [streamHlsUrl, setStreamHlsUrl] = useState('');
     const [streams, setStreams] = useState<any[]>([]);
     const [currentQuality, setCurrentQuality] = useState<string>('');
     const [streamLoading, setStreamLoading] = useState(false);
@@ -24,6 +26,7 @@ export default function MoviePage() {
     const [showNextEpisodeBtn, setShowNextEpisodeBtn] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
+    const lowBufferSinceRef = useRef<number | null>(null);
 
     useEffect(() => {
         if (url) {
@@ -73,7 +76,7 @@ export default function MoviePage() {
 
     // Handle restoring video time after stream loads
     useEffect(() => {
-        if (streamUrl && videoRef.current && details?.movieId) {
+        if ((streamUrl || streamHlsUrl) && videoRef.current && details?.movieId) {
             const savedStateStr = localStorage.getItem(`hdrezka_state_${details.movieId}`);
             if (savedStateStr) {
                 try {
@@ -84,12 +87,56 @@ export default function MoviePage() {
                         : true;
 
                     if (isSameContext && savedState.currentTime > 0) {
-                        videoRef.current.currentTime = savedState.currentTime;
+                        const restoreTime = () => {
+                            if (videoRef.current && Math.abs(videoRef.current.currentTime - savedState.currentTime) > 2) {
+                                videoRef.current.currentTime = savedState.currentTime;
+                            }
+                        };
+
+                        // Wait for metadata to load before setting time
+                        videoRef.current.addEventListener('loadedmetadata', restoreTime, { once: true });
+                        // Also try immediately in case it's already loaded or restoring from memory cache
+                        restoreTime();
                     }
                 } catch (e) { }
             }
         }
-    }, [streamUrl]);
+    }, [streamUrl, streamHlsUrl]);
+
+    // HLS Binding Logic
+    useEffect(() => {
+        if (!videoRef.current || !streamHlsUrl) return;
+
+        let hls: Hls;
+
+        const video = videoRef.current;
+
+        // Use HLS.js specifically if supported and not running native
+        if (Hls.isSupported()) {
+            hls = new Hls({
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60,
+            });
+            hls.loadSource(streamHlsUrl);
+            hls.attachMedia(video);
+
+            hls.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                    console.error("HLS Error:", data.type);
+                }
+            });
+
+            // Fallback for native HLS (e.g. Safari on iOS)
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = streamHlsUrl;
+        }
+
+        return () => {
+            if (hls) {
+                hls.destroy();
+            }
+        };
+    }, [streamHlsUrl]);
 
     const saveStateToStorage = (updates: any) => {
         if (!details?.movieId) return;
@@ -116,13 +163,20 @@ export default function MoviePage() {
         }
     };
 
-    const fetchStream = async (specificMovieId: string, translatorId: string, season?: string, episode?: string) => {
+    const fetchStream = async (specificMovieId: string, translatorId: string, season?: string, episode?: string, action?: string) => {
         setStreamLoading(true);
         try {
             let urlToFetch = `/api/stream?id=${specificMovieId}&translator_id=${translatorId}`;
             if (season && episode) {
                 urlToFetch += `&season=${season}&episode=${episode}`;
             }
+            if (action) {
+                urlToFetch += `&action=${action}`;
+            }
+            if (url) {
+                urlToFetch += `&referer_url=${encodeURIComponent(url)}`;
+            }
+            urlToFetch += `&_t=${Date.now()}`; // Cache buster
             const res = await fetch(urlToFetch);
             if (!res.ok) throw new Error('Stream fetch failed');
             const data = await res.json();
@@ -142,8 +196,38 @@ export default function MoviePage() {
                     data.streams[0];
 
                 setStreams(data.streams);
-                setStreamUrl(idealStream.url.trim());
+                setStreamUrl(idealStream.url?.trim() || '');
+                setStreamHlsUrl(idealStream.hlsUrl?.trim() || '');
                 setCurrentQuality(idealStream.quality);
+
+                // Update seasons/episodes if the stream response includes translator-specific data
+                if (data.seasons && data.seasons.length > 0) {
+                    console.log('[Episodes] Updating from stream response:', data.seasons.length, 'seasons,', Object.keys(data.episodes || {}).length, 'episode groups');
+                    setDetails((prev: any) => ({
+                        ...prev,
+                        seasons: data.seasons,
+                        episodes: data.episodes || {},
+                        isSeries: true,
+                    }));
+
+                    // Validate current season/episode still exist in the new list
+                    const seasonExists = data.seasons.some((s: any) => s.id === season);
+                    if (!seasonExists && data.seasons.length > 0) {
+                        const firstSeason = data.seasons[0].id;
+                        setSelectedSeason(firstSeason);
+                        const firstEp = data.episodes?.[firstSeason]?.[0]?.id || '';
+                        setSelectedEpisode(firstEp);
+                        console.log('[Episodes] Season reset to:', firstSeason, 'ep:', firstEp);
+                    } else if (season && data.episodes?.[season]) {
+                        const episodeExists = data.episodes[season].some((e: any) => e.id === episode);
+                        if (!episodeExists && data.episodes[season].length > 0) {
+                            setSelectedEpisode(data.episodes[season][0].id);
+                            console.log('[Episodes] Episode reset to:', data.episodes[season][0].id);
+                        }
+                    }
+                } else {
+                    console.log('[Episodes] No seasons data in response');
+                }
 
                 // Scroll to video if possible after setting URL
                 setTimeout(() => {
@@ -175,7 +259,8 @@ export default function MoviePage() {
         const currentTime = videoRef.current?.currentTime || 0;
         saveStateToStorage({ translatorId: tId, currentTime });
 
-        fetchStream(mId, tId, selectedSeason, selectedEpisode);
+        // Use get_episodes to fetch translator-specific episode list + first episode stream
+        fetchStream(mId, tId, undefined, undefined, 'get_episodes');
         setShowQualities(false);
     };
 
@@ -219,6 +304,57 @@ export default function MoviePage() {
         setShowNextEpisodeBtn(false);
     };
 
+    // === Independent buffer health monitor (runs even when video is stalled) ===
+    useEffect(() => {
+        if (!streamUrl && !streamHlsUrl) return;
+
+        console.log(`[ABR] Monitor started — streamUrl: ${!!streamUrl}, hlsUrl: ${!!streamHlsUrl}, streams: ${streams.length}, quality: ${currentQuality}`);
+
+        const interval = setInterval(() => {
+            const video = videoRef.current;
+            if (!video) { console.log('[ABR] No video ref'); return; }
+            if (video.paused) { console.log('[ABR] Video is paused, skipping'); return; }
+            if (!video.duration) { console.log('[ABR] No duration yet'); return; }
+            if (video.currentTime < 1) { console.log('[ABR] Still in first second'); return; }
+            if (streams.length <= 1) { console.log('[ABR] Only 1 stream available, nothing to downgrade to'); return; }
+
+            // Calculate how many seconds of video are buffered ahead
+            let bufferAhead = 0;
+            const bufferedRanges = [];
+            for (let i = 0; i < video.buffered.length; i++) {
+                bufferedRanges.push(`[${video.buffered.start(i).toFixed(1)}-${video.buffered.end(i).toFixed(1)}]`);
+                if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) > video.currentTime) {
+                    bufferAhead = video.buffered.end(i) - video.currentTime;
+                }
+            }
+
+            const lowForMs = lowBufferSinceRef.current ? Date.now() - lowBufferSinceRef.current : 0;
+            console.log(`[ABR] time: ${video.currentTime.toFixed(1)}s | buffer ahead: ${bufferAhead.toFixed(1)}s | ranges: ${bufferedRanges.join(', ')} | quality: ${currentQuality} | low for: ${lowForMs}ms`);
+
+            // If buffer is dangerously low (< 2 seconds ahead)
+            if (bufferAhead < 2) {
+                if (lowBufferSinceRef.current === null) {
+                    console.log('[ABR] ⚠️ Buffer dropped below 2s — starting countdown');
+                    lowBufferSinceRef.current = Date.now();
+                } else if (Date.now() - lowBufferSinceRef.current > 5000) {
+                    console.log(`[ABR] 🔻 Buffer critically low for 5s+, DOWNGRADING from ${currentQuality}`);
+                    lowBufferSinceRef.current = null;
+                    downgradeQuality();
+                }
+            } else {
+                if (lowBufferSinceRef.current !== null) {
+                    console.log('[ABR] ✅ Buffer recovered, resetting countdown');
+                }
+                lowBufferSinceRef.current = null;
+            }
+        }, 1000);
+
+        return () => {
+            console.log('[ABR] Monitor cleaned up');
+            clearInterval(interval);
+        };
+    }, [streamUrl, streamHlsUrl, streams, currentQuality]);
+
     const handleTimeUpdate = () => {
         if (!videoRef.current) return;
 
@@ -250,7 +386,8 @@ export default function MoviePage() {
         const currentTime = videoRef.current?.currentTime || 0;
         const isPaused = videoRef.current?.paused;
 
-        setStreamUrl(stream.url.trim());
+        setStreamUrl(stream.url?.trim() || '');
+        setStreamHlsUrl(stream.hlsUrl?.trim() || '');
         setCurrentQuality(stream.quality);
         setShowQualities(false);
         saveStateToStorage({ preferredQuality: stream.quality });
@@ -264,6 +401,33 @@ export default function MoviePage() {
                 }
             }
         }, 100);
+    };
+
+    const downgradeQuality = () => {
+        if (streams.length <= 1) return;
+
+        const currentResMatch = currentQuality.match(/(\d+)p/);
+        if (!currentResMatch) return;
+        const currentRes = parseInt(currentResMatch[1]);
+
+        // Find the highest resolution that is strictly lower than currentRes
+        let targetStream = null;
+        let targetRes = -1;
+
+        for (const s of streams) {
+            const resMatch = s.quality.match(/(\d+)p/);
+            if (resMatch) {
+                const res = parseInt(resMatch[1]);
+                if (res < currentRes && res > targetRes) {
+                    targetRes = res;
+                    targetStream = s;
+                }
+            }
+        }
+
+        if (targetStream) {
+            handleQualityChange(targetStream);
+        }
     };
 
     if (loading) {
@@ -379,7 +543,7 @@ export default function MoviePage() {
                                     onEnded={handleVideoEnded}
                                     onTimeUpdate={handleTimeUpdate}
                                     className="w-full h-full outline-none"
-                                    src={streamUrl}
+                                    src={!streamHlsUrl ? streamUrl : undefined}
                                     controlsList="nodownload"
                                     poster={details.poster}
                                 >
@@ -459,5 +623,17 @@ export default function MoviePage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+export default function MoviePage() {
+    return (
+        <Suspense fallback={
+            <div className="flex justify-center items-center h-[60vh]">
+                <div className="w-12 h-12 border-4 border-gray-800 border-t-red-500 rounded-full animate-spin"></div>
+            </div>
+        }>
+            <MoviePageContent />
+        </Suspense>
     );
 }
