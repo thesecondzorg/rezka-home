@@ -81,15 +81,24 @@ function MoviePageContent() {
             if (savedStateStr) {
                 try {
                     const savedState = JSON.parse(savedStateStr);
-                    // Only restore time if it's for the currently selected season/episode (or movie)
-                    const isSameContext = details.isSeries
-                        ? (savedState.seasonId === selectedSeason && savedState.episodeId === selectedEpisode)
-                        : true;
+                    let targetTime = 0;
 
-                    if (isSameContext && savedState.currentTime > 0) {
+                    if (details.isSeries) {
+                        const epKey = `${selectedSeason}_${selectedEpisode}`;
+                        if (savedState.episodesTime && savedState.episodesTime[epKey] !== undefined) {
+                            targetTime = savedState.episodesTime[epKey];
+                        } else if (savedState.seasonId === selectedSeason && savedState.episodeId === selectedEpisode) {
+                            // Fallback for older states without episodesTime
+                            targetTime = savedState.currentTime;
+                        }
+                    } else {
+                        targetTime = savedState.currentTime;
+                    }
+
+                    if (targetTime > 0) {
                         const restoreTime = () => {
-                            if (videoRef.current && Math.abs(videoRef.current.currentTime - savedState.currentTime) > 2) {
-                                videoRef.current.currentTime = savedState.currentTime;
+                            if (videoRef.current && Math.abs(videoRef.current.currentTime - targetTime) > 2) {
+                                videoRef.current.currentTime = targetTime;
                             }
                         };
 
@@ -101,7 +110,7 @@ function MoviePageContent() {
                 } catch (e) { }
             }
         }
-    }, [streamUrl, streamHlsUrl]);
+    }, [streamUrl, streamHlsUrl, selectedSeason, selectedEpisode]);
 
     // HLS Binding Logic
     useEffect(() => {
@@ -145,7 +154,8 @@ function MoviePageContent() {
         let existing = {};
         try { if (existingStr) existing = JSON.parse(existingStr); } catch (e) { }
 
-        localStorage.setItem(key, JSON.stringify({ ...existing, ...updates }));
+        const newValues = typeof updates === 'function' ? updates(existing) : updates;
+        localStorage.setItem(key, JSON.stringify({ ...existing, ...newValues }));
     };
 
     const fetchDetails = async (movieUrl: string) => {
@@ -257,10 +267,20 @@ function MoviePageContent() {
 
         // Save current time before switching so we can resume from here
         const currentTime = videoRef.current?.currentTime || 0;
-        saveStateToStorage({ translatorId: tId, currentTime });
+        saveStateToStorage((existing: any) => {
+            const episodesTime = existing.episodesTime || {};
+            if (details?.isSeries && selectedSeason && selectedEpisode) {
+                episodesTime[`${selectedSeason}_${selectedEpisode}`] = currentTime;
+            }
+            return {
+                translatorId: tId,
+                currentTime,
+                episodesTime
+            };
+        });
 
-        // Use get_episodes to fetch translator-specific episode list + first episode stream
-        fetchStream(mId, tId, undefined, undefined, 'get_episodes');
+        // Use get_episodes to fetch translator-specific episode list + try to maintain current episode
+        fetchStream(mId, tId, selectedSeason || undefined, selectedEpisode || undefined, 'get_episodes');
         setShowQualities(false);
     };
 
@@ -268,14 +288,14 @@ function MoviePageContent() {
         setSelectedSeason(seasonId);
         const firstEp = details.episodes?.[seasonId]?.[0]?.id || '';
         setSelectedEpisode(firstEp);
-        saveStateToStorage({ seasonId, episodeId: firstEp, currentTime: 0 });
+        saveStateToStorage({ seasonId, episodeId: firstEp });
         fetchStream(details.movieId, selectedTranslatorId, seasonId, firstEp);
         setShowQualities(false);
     };
 
     const handleEpisodeChange = (episodeId: string) => {
         setSelectedEpisode(episodeId);
-        saveStateToStorage({ episodeId, currentTime: 0 });
+        saveStateToStorage({ episodeId });
         fetchStream(details.movieId, selectedTranslatorId, selectedSeason, episodeId);
         setShowQualities(false);
     };
@@ -357,17 +377,25 @@ function MoviePageContent() {
 
     const handleTimeUpdate = () => {
         if (!videoRef.current) return;
+        if (streamLoading) return; // Do not save old time while transitioning streams
 
         const video = videoRef.current;
         const currentTime = video.currentTime;
         const duration = video.duration;
 
         // Save time to localstorage periodically
-        saveStateToStorage({
-            currentTime,
-            seasonId: selectedSeason,
-            episodeId: selectedEpisode,
-            translatorId: selectedTranslatorId
+        saveStateToStorage((existing: any) => {
+            const episodesTime = existing.episodesTime || {};
+            if (details?.isSeries && selectedSeason && selectedEpisode) {
+                episodesTime[`${selectedSeason}_${selectedEpisode}`] = currentTime;
+            }
+            return {
+                currentTime,
+                episodesTime,
+                seasonId: selectedSeason,
+                episodeId: selectedEpisode,
+                translatorId: selectedTranslatorId
+            };
         });
 
         if (!details?.isSeries) return;
