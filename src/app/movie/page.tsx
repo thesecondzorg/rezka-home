@@ -26,6 +26,7 @@ function MoviePageContent() {
     const [showNextEpisodeBtn, setShowNextEpisodeBtn] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
+    const hlsRef = useRef<Hls | null>(null);
     const lowBufferSinceRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -116,16 +117,22 @@ function MoviePageContent() {
     useEffect(() => {
         if (!videoRef.current || !streamHlsUrl) return;
 
-        let hls: Hls;
-
         const video = videoRef.current;
 
         // Use HLS.js specifically if supported and not running native
         if (Hls.isSupported()) {
-            hls = new Hls({
+            // Clean up existing instance before recreating
+            if (hlsRef.current) {
+                hlsRef.current.destroy();
+            }
+
+            const hls = new Hls({
                 maxBufferLength: 30,
                 maxMaxBufferLength: 60,
+                startLevel: -1 // Auto by default
             });
+            hlsRef.current = hls;
+
             hls.loadSource(streamHlsUrl);
             hls.attachMedia(video);
 
@@ -135,14 +142,55 @@ function MoviePageContent() {
                 }
             });
 
+            // Update UI qualities if the manifest loaded internal variants
+            hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+                if (data.levels.length > 1) {
+                    // Reverse map bandwidth to a display name to match UI expectations
+                    const levelMap = data.levels.map((lvl, index) => {
+                        return {
+                            quality: lvl.name || `${lvl.height}p`,
+                            levelIndex: index,
+                            isInternalHls: true,
+                            hlsUrl: streamHlsUrl // Keep reference so fallback ui doesn't crash
+                        };
+                    });
+
+                    // Prepend the Auto mode at the top so users can turn ABR back on
+                    const builtStreams = [
+                        { quality: 'Auto (ABR)', levelIndex: -1, isInternalHls: true, hlsUrl: streamHlsUrl },
+                        ...levelMap.reverse()
+                    ];
+
+                    setStreams(builtStreams);
+
+                    // Check if the user had a preferred quality saved from earlier and apply it natively
+                    // (we couldn't do this during fetchStream because HLS variants hadn't loaded yet)
+                    const detailsStr = localStorage.getItem(`hdrezka_state_${video.getAttribute('data-movie-id')}`);
+                    if (detailsStr) {
+                        try {
+                            const saved = JSON.parse(detailsStr);
+                            if (saved.preferredQuality && saved.preferredQuality !== 'Auto (ABR)') {
+                                const matchedLvl = builtStreams.find(s => s.quality === saved.preferredQuality);
+                                if (matchedLvl && matchedLvl.levelIndex >= 0) {
+                                    hls.startLevel = matchedLvl.levelIndex; // Force initial load buffer to this level
+                                    hls.nextLevel = matchedLvl.levelIndex;
+                                    setCurrentQuality(matchedLvl.quality);
+                                }
+                            }
+                        } catch (e) { }
+                    }
+                }
+            });
+
             // Fallback for native HLS (e.g. Safari on iOS)
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = streamHlsUrl;
         }
 
         return () => {
-            if (hls) {
-                hls.destroy();
+            if (hlsRef.current) {
+                hlsRef.current.destroy();
+                hlsRef.current = null;
             }
         };
     }, [streamHlsUrl]);
@@ -197,18 +245,36 @@ function MoviePageContent() {
                 let preferredQuality = '';
                 try { if (savedStateStr) preferredQuality = JSON.parse(savedStateStr).preferredQuality; } catch (e) { }
 
-                // Find user's preferred, then 1080p, then 720p, or fallback to first
-                const idealStream =
-                    (preferredQuality && data.streams.find((s: any) => s.quality === preferredQuality)) ||
-                    data.streams.find((s: any) => s.quality === '1080p') ||
-                    data.streams.find((s: any) => s.quality === '720p') ||
-                    data.streams.find((s: any) => s.quality === '480p') ||
-                    data.streams[0];
+                if (data.abrUrl) {
+                    // 1. ABR IS AVAILABLE (Primary Strategy)
+                    // We only load the Auto manifest initially. HLS.js will parse it and populate the UI dropdown naturally.
+                    const initialStreams = [
+                        { quality: 'Auto (ABR)', url: '', hlsUrl: data.abrUrl, isInternalHls: false }
+                    ];
 
-                setStreams(data.streams);
-                setStreamUrl(idealStream.url?.trim() || '');
-                setStreamHlsUrl(idealStream.hlsUrl?.trim() || '');
-                setCurrentQuality(idealStream.quality);
+                    setStreams(initialStreams);
+                    setStreamUrl('');
+                    setStreamHlsUrl(data.abrUrl);
+                    setCurrentQuality('Auto (ABR)');
+
+                    // Note: We don't apply preferredQuality immediately here because HLS.js needs to download 
+                    // the manifest first to know what internal variant IDs exist. It will be handled organically.
+
+                } else {
+                    // 2. NO ABR MANIFEST (Legacy MP4 Fallback)
+                    // Find user's preferred, then 1080p, then 720p, or fallback to first
+                    const idealStream =
+                        (preferredQuality && data.streams.find((s: any) => s.quality === preferredQuality)) ||
+                        data.streams.find((s: any) => s.quality === '1080p') ||
+                        data.streams.find((s: any) => s.quality === '720p') ||
+                        data.streams.find((s: any) => s.quality === '480p') ||
+                        data.streams[0];
+
+                    setStreams(data.streams);
+                    setStreamUrl(idealStream.url?.trim() || '');
+                    setStreamHlsUrl(idealStream.hlsUrl?.trim() || '');
+                    setCurrentQuality(idealStream.quality);
+                }
 
                 // Update seasons/episodes if the stream response includes translator-specific data
                 if (data.seasons && data.seasons.length > 0) {
@@ -288,14 +354,26 @@ function MoviePageContent() {
         setSelectedSeason(seasonId);
         const firstEp = details.episodes?.[seasonId]?.[0]?.id || '';
         setSelectedEpisode(firstEp);
-        saveStateToStorage({ seasonId, episodeId: firstEp });
+        saveStateToStorage((existing: any) => {
+            const episodesTime = existing.episodesTime || {};
+            if (firstEp) {
+                episodesTime[`${seasonId}_${firstEp}`] = 0;
+            }
+            return { seasonId, episodeId: firstEp, episodesTime, currentTime: 0 };
+        });
         fetchStream(details.movieId, selectedTranslatorId, seasonId, firstEp);
         setShowQualities(false);
     };
 
     const handleEpisodeChange = (episodeId: string) => {
         setSelectedEpisode(episodeId);
-        saveStateToStorage({ episodeId });
+        saveStateToStorage((existing: any) => {
+            const episodesTime = existing.episodesTime || {};
+            if (selectedSeason) {
+                episodesTime[`${selectedSeason}_${episodeId}`] = 0;
+            }
+            return { episodeId, episodesTime, currentTime: 0 };
+        });
         fetchStream(details.movieId, selectedTranslatorId, selectedSeason, episodeId);
         setShowQualities(false);
     };
@@ -331,6 +409,8 @@ function MoviePageContent() {
         console.log(`[ABR] Monitor started — streamUrl: ${!!streamUrl}, hlsUrl: ${!!streamHlsUrl}, streams: ${streams.length}, quality: ${currentQuality}`);
 
         const interval = setInterval(() => {
+            if (currentQuality === 'Auto (ABR)') return; // Let hls.js handle this natively
+
             const video = videoRef.current;
             if (!video) { console.log('[ABR] No video ref'); return; }
             if (video.paused) { console.log('[ABR] Video is paused, skipping'); return; }
@@ -410,15 +490,31 @@ function MoviePageContent() {
         }
     };
 
-    const handleQualityChange = (stream: any) => {
+    const handleQualityChange = (stream: any, isAutomatic = false) => {
+        setShowQualities(false);
+
+        // If the selected stream item is an internal HLS segment configuration from the manifest
+        if (stream.isInternalHls && hlsRef.current) {
+            hlsRef.current.nextLevel = stream.levelIndex; // Gracefully switch segments without unloading the video
+            setCurrentQuality(stream.quality);
+
+            if (!isAutomatic) {
+                saveStateToStorage({ preferredQuality: stream.quality });
+            }
+            return;
+        }
+
+        // Hard stream switch fallback (e.g. falling entirely out of ABR back to an MP4 url)
         const currentTime = videoRef.current?.currentTime || 0;
         const isPaused = videoRef.current?.paused;
 
         setStreamUrl(stream.url?.trim() || '');
         setStreamHlsUrl(stream.hlsUrl?.trim() || '');
         setCurrentQuality(stream.quality);
-        setShowQualities(false);
-        saveStateToStorage({ preferredQuality: stream.quality });
+
+        if (!isAutomatic) {
+            saveStateToStorage({ preferredQuality: stream.quality });
+        }
 
         // Restore playback state after a short delay to allow video src to update
         setTimeout(() => {
@@ -454,7 +550,7 @@ function MoviePageContent() {
         }
 
         if (targetStream) {
-            handleQualityChange(targetStream);
+            handleQualityChange(targetStream, true);
         }
     };
 
@@ -568,6 +664,7 @@ function MoviePageContent() {
                             src={!streamHlsUrl ? streamUrl : undefined}
                             controlsList="nodownload"
                             poster={details.poster}
+                            data-movie-id={details.movieId}
                         >
                             Your browser does not support the video tag.
                         </video>
@@ -581,7 +678,7 @@ function MoviePageContent() {
                         )}
 
                         {/* Poster Fallback Overlay (when no stream loaded) */}
-                        {!streamUrl && !streamLoading && (
+                        {!streamUrl && !streamHlsUrl && !streamLoading && (
                             <div className="absolute inset-0 z-20 flex items-center justify-center">
                                 {details.poster && (
                                     <img src={details.poster} alt="Poster fallback" className="absolute inset-0 w-full h-full object-cover opacity-30" />

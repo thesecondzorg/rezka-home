@@ -65,11 +65,15 @@ export async function GET(request: Request) {
         }
 
         let streams = [];
+        let abrManifest = '';
+        let abrUrl = '';
+
         if (json.url) {
-            streams = json.url.split(',').map((s: string) => {
+            // 1. Parse all streams
+            const parsedStreams = json.url.split(',').map((s: string) => {
                 const match = s.match(/\[(.*?)\](.*)/);
                 if (match) {
-                    const quality = match[1];
+                    const quality = match[1]; // e.g. "1080p", "720p"
                     const urlsString = match[2];
 
                     let url = '';
@@ -89,10 +93,49 @@ export async function GET(request: Request) {
                         url = urlParts[urlParts.length - 1].trim();
                     }
 
-                    return { quality, url, hlsUrl };
+                    // Extract numeric resolution for sorting (e.g. 1080)
+                    const resMatch = quality.match(/(\d+)p/);
+                    const resolutionLevel = resMatch ? parseInt(resMatch[1], 10) : 0;
+
+                    return { quality, url, hlsUrl, resolutionLevel };
                 }
-                return { quality: 'unknown', url: s };
-            });
+                return null;
+            }).filter(Boolean);
+
+            streams = parsedStreams;
+
+            // 2. Build ABR Manifest
+            // Only build if we actually have HLS streams to provide
+            const hlsStreams = parsedStreams.filter((s: any) => s.hlsUrl);
+
+            if (hlsStreams.length > 0) {
+                // Sort from lowest quality to highest for the manifest
+                hlsStreams.sort((a: any, b: any) => a.resolutionLevel - b.resolutionLevel);
+
+                abrManifest = "#EXTM3U\n#EXT-X-VERSION:3\n";
+
+                // Standard bitrates mapped to common resolutions
+                const bitrateMap: Record<number, { bandwidth: number, width: number, height: number }> = {
+                    360: { bandwidth: 800000, width: 640, height: 360 },
+                    480: { bandwidth: 1400000, width: 854, height: 480 },
+                    720: { bandwidth: 2800000, width: 1280, height: 720 },
+                    1080: { bandwidth: 5000000, width: 1920, height: 1080 },
+                    1440: { bandwidth: 8000000, width: 2560, height: 1440 },
+                    2160: { bandwidth: 15000000, width: 3840, height: 2160 }
+                };
+
+                hlsStreams.forEach((stream: any) => {
+                    const res = stream.resolutionLevel;
+                    const props = bitrateMap[res] || { bandwidth: res * 3000, width: Math.round(res * 1.77), height: res };
+
+                    abrManifest += `#EXT-X-STREAM-INF:BANDWIDTH=${props.bandwidth},RESOLUTION=${props.width}x${props.height},NAME="${stream.quality}"\n`;
+                    abrManifest += `${stream.hlsUrl}\n`;
+                });
+
+                // Convert payload into base64 to pass securely to a local proxy route
+                const encodedManifest = Buffer.from(abrManifest).toString('base64');
+                abrUrl = `/api/manifest?data=${encodedManifest}`;
+            }
         }
 
         // Parse seasons/episodes HTML if present (translator-specific)
@@ -122,6 +165,7 @@ export async function GET(request: Request) {
         }
 
         return NextResponse.json({
+            abrUrl,
             streams,
             seasons,
             episodes,
