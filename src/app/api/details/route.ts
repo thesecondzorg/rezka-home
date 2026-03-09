@@ -3,6 +3,10 @@ import * as cheerio from 'cheerio';
 
 export const dynamic = 'force-dynamic';
 
+// Simple in-memory cache for movie details
+const detailsCache: Record<string, { data: any, timestamp: number }> = {};
+const CACHE_TTL = 3600 * 1000; // 1 hour
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const url = searchParams.get('url');
@@ -11,22 +15,36 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'URL parameter is required' }, { status: 400 });
     }
 
+    // Check cache
+    if (detailsCache[url] && (Date.now() - detailsCache[url].timestamp < CACHE_TTL)) {
+        console.log(`[Details] Serving from cache: ${url}`);
+        return NextResponse.json(detailsCache[url].data);
+    }
+
+    // Cookie persistence: Use env var or pass-through from client
+    const reqCookie = request.headers.get('cookie');
+    const cookieHeader = process.env.HDREZKA_COOKIE || reqCookie || '';
+
     try {
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br, zstd',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Cache-Control': 'max-age=0',
-            }
-        });
+        const headers: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+        };
+
+        if (cookieHeader) {
+            headers['Cookie'] = cookieHeader;
+        }
+
+        const response = await fetch(url, { headers });
         const html = await response.text();
         const $ = cheerio.load(html);
 
@@ -127,6 +145,9 @@ export async function GET(request: Request) {
             episodes,
             movieId
         };
+
+        // Cache successful result
+        detailsCache[url] = { data: details, timestamp: Date.now() };
 
         return NextResponse.json(details);
 

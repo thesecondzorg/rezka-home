@@ -5,6 +5,10 @@ import * as cheerio from 'cheerio';
 // Prevent Next.js from caching this route
 export const dynamic = 'force-dynamic';
 
+// Simple in-memory cache for stream URLs
+const streamCache: Record<string, { data: any, timestamp: number }> = {};
+const STREAM_CACHE_TTL = 1800 * 1000; // 30 minutes (CDN urls expire)
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const movieId = searchParams.get('id');
@@ -18,6 +22,19 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'id and translator_id are required' }, { status: 400 });
     }
 
+    // Cache key based on all identifying params
+    const cacheKey = `${movieId}_${translatorId}_${season || ''}_${episode || ''}_${action}`;
+    if (streamCache[cacheKey] && (Date.now() - streamCache[cacheKey].timestamp < STREAM_CACHE_TTL)) {
+        console.log(`[Stream] Serving from cache: ${cacheKey}`);
+        return NextResponse.json(streamCache[cacheKey].data, {
+            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        });
+    }
+
+    // Cookie persistence: Use env var or pass-through from client
+    const reqCookie = request.headers.get('cookie');
+    const cookieHeader = process.env.HDREZKA_COOKIE || reqCookie || '';
+
     try {
         const formData = new URLSearchParams();
         formData.append('id', movieId);
@@ -27,22 +44,28 @@ export async function GET(request: Request) {
         formData.append('favs', randomUUID());
         formData.append('action', action);
 
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Origin': 'https://hdrezka.name',
+            'Referer': refererUrl,
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+        };
+
+        if (cookieHeader) {
+            headers['Cookie'] = cookieHeader;
+        }
+
         const response = await fetch(`https://hdrezka.name/ajax/get_cdn_series/?t=${Date.now()}`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br, zstd',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': 'https://hdrezka.name',
-                'Referer': refererUrl,
-                'Connection': 'keep-alive',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
-            },
+            headers: headers,
             cache: 'no-store',
             body: formData
         });
@@ -161,14 +184,19 @@ export async function GET(request: Request) {
             });
         }
 
-        return NextResponse.json({
+        const result = {
             abrUrl,
             streams,
             seasons,
             episodes,
             subtitle: json.subtitle,
             thumbnails: json.thumbnails
-        }, {
+        };
+
+        // Cache successful result
+        streamCache[cacheKey] = { data: result, timestamp: Date.now() };
+
+        return NextResponse.json(result, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
         });
 
