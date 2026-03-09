@@ -27,34 +27,31 @@ export async function GET(request: Request) {
         formData.append('favs', randomUUID());
         formData.append('action', action);
 
-        // Retry up to 3 times if the connection drops
-        let json: any = null;
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-                const response = await fetch(`https://hdrezka.name/ajax/get_cdn_series/?t=${Date.now()}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
-                        'Accept': 'application/json, text/javascript, */*; q=0.01',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Origin': 'https://hdrezka.name',
-                        'Referer': refererUrl,
-                        'Connection': 'keep-alive',
-                    },
-                    cache: 'no-store',
-                    body: formData
-                });
-                json = await response.json();
-                break; // Success, exit retry loop
-            } catch (fetchErr) {
-                console.warn(`[Stream] Attempt ${attempt}/3 failed:`, fetchErr instanceof Error ? fetchErr.message : fetchErr);
-                if (attempt === 3) throw fetchErr;
-                await new Promise(r => setTimeout(r, 500)); // Wait before retry
-            }
+        const response = await fetch(`https://hdrezka.name/ajax/get_cdn_series/?t=${Date.now()}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br, zstd',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://hdrezka.name',
+                'Referer': refererUrl,
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+            },
+            cache: 'no-store',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`Upstream returned ${response.status}`);
         }
+
+        const json = await response.json();
 
         if (!json.success) {
             console.error('Stream extraction failed upstream', json);
