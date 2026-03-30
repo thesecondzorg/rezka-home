@@ -31,9 +31,10 @@ export async function GET(request: Request) {
         });
     }
 
-    // Cookie persistence: Use env var or pass-through from client
+    // Cookie persistence & User-Agent pass-through
     const reqCookie = request.headers.get('cookie');
     const cookieHeader = process.env.HDREZKA_COOKIE || reqCookie || '';
+    const reqUserAgent = request.headers.get('user-agent') || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0';
 
     try {
         const formData = new URLSearchParams();
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
 
         const headers: Record<string, string> = {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0',
+            'User-Agent': reqUserAgent,
             'Accept': 'application/json, text/javascript, */*; q=0.01',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
