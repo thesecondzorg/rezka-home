@@ -24,14 +24,30 @@ function MoviePageContent() {
     const [selectedSeason, setSelectedSeason] = useState<string>('');
     const [selectedEpisode, setSelectedEpisode] = useState<string>('');
     const [showNextEpisodeBtn, setShowNextEpisodeBtn] = useState(false);
+    
+    // Watchlist State
+    const [watchStatus, setWatchStatus] = useState<string | null>(null);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const hlsRef = useRef<Hls | null>(null);
     const lowBufferSinceRef = useRef<number | null>(null);
+    const dbSyncTimeoutRef = useRef<any>(null);
 
     useEffect(() => {
         if (url) {
             fetchDetails(url);
+            
+            // Fetch initial Watchlist status
+            fetch('/api/watchlist')
+              .then(res => res.json())
+              .then(data => {
+                  const item = data.items?.find((i: any) => i.url === url);
+                  if (item) setWatchStatus(item.type);
+              });
+        }
+
+        return () => {
+            if (dbSyncTimeoutRef.current) clearTimeout(dbSyncTimeoutRef.current);
         }
     }, [url]);
 
@@ -478,6 +494,30 @@ function MoviePageContent() {
             };
         });
 
+        // Sync to SQLite Profile Server-side (throttled to once every 5 seconds)
+        if (!dbSyncTimeoutRef.current && details) {
+            dbSyncTimeoutRef.current = setTimeout(() => {
+                fetch('/api/watchlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                       url,
+                       title: details.title,
+                       poster: details.poster,
+                       type: 'watching', // automatically upgrade
+                       status: {
+                           seasonId: selectedSeason || undefined,
+                           episodeId: selectedEpisode || undefined,
+                           currentTime,
+                           duration
+                       }
+                    })
+                });
+                if (watchStatus !== 'watching') setWatchStatus('watching');
+                dbSyncTimeoutRef.current = null;
+            }, 5000);
+        }
+
         if (!details?.isSeries) return;
 
         const timeLeft = duration - currentTime;
@@ -577,6 +617,23 @@ function MoviePageContent() {
         );
     }
 
+    const toggleWatchList = async (type: string) => {
+       if (!details || !url) return;
+       const newType = watchStatus === type ? 'remove' : type;
+       setWatchStatus(newType === 'remove' ? null : newType);
+
+       await fetch('/api/watchlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             url,
+             title: details.title,
+             poster: details.poster,
+             type: newType
+          })
+       });
+    };
+
     return (
         <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
             <Link href="/" className="inline-flex items-center text-gray-400 hover:text-white mb-8 transition-colors">
@@ -586,9 +643,33 @@ function MoviePageContent() {
 
             <div className="mb-12">
                 <div className="w-full flex flex-col">
-                    <div className="mb-6">
-                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-2">{details.title}</h1>
-                        {details.origTitle && <p className="text-xl text-gray-400 font-medium">{details.origTitle}</p>}
+                    <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-2">{details.title}</h1>
+                            {details.origTitle && <p className="text-xl text-gray-400 font-medium">{details.origTitle}</p>}
+                        </div>
+                        
+                        <div className="flex flex-row gap-2 shrink-0">
+                           <button 
+                             onClick={() => toggleWatchList('plan_to_watch')} 
+                             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border flex gap-2 items-center ${watchStatus === 'plan_to_watch' ? 'bg-gray-800 border-gray-500 text-white shadow-sm' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white'}`}
+                           >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                              </svg>
+                              Plan to Watch
+                           </button>
+                           <button 
+                             onClick={() => toggleWatchList('watching')} 
+                             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border flex gap-2 items-center ${watchStatus === 'watching' ? 'bg-red-600/10 border-red-500 text-white shadow-sm' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white hover:border-red-500/50'}`}
+                           >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              Watching
+                           </button>
+                        </div>
                     </div>
 
                     {/* Translations */}
