@@ -1,5 +1,6 @@
 import "@/app/globals.css";
 import { type Metadata } from "next";
+import { Navigation } from "@/components/Navigation";
 
 export const metadata: Metadata = {
   title: "RezkaStream",
@@ -21,7 +22,11 @@ export default function RootLayout({
                 Rezka<span className="text-red-500">Stream</span>
               </span>
             </a>
-            {/* The search component will be added here or inside the page */}
+            
+            <div className="hidden md:flex flex-1 justify-center px-8">
+              <Navigation />
+            </div>
+
             <div className="text-sm font-medium text-gray-400">
               Next.js Wrapper
             </div>

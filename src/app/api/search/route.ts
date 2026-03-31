@@ -12,11 +12,14 @@ export async function GET(request: Request) {
     }
 
     const url = `https://hdrezka.name/search/?do=search&subaction=search&q=${encodeURIComponent(query)}`;
+    console.log('HDRezka API Call:', url);
+
+    const reqUserAgent = request.headers.get('user-agent');
 
     try {
         const response = await fetch(url, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                ...(reqUserAgent ? { 'User-Agent': reqUserAgent } : {}),
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             }
         });

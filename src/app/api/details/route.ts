@@ -24,11 +24,11 @@ export async function GET(request: Request) {
     // Cookie persistence & User-Agent pass-through
     const reqCookie = request.headers.get('cookie');
     const cookieHeader = process.env.HDREZKA_COOKIE || reqCookie || '';
-    const reqUserAgent = request.headers.get('user-agent') || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0';
+    const reqUserAgent = request.headers.get('user-agent');
 
     try {
         const headers: Record<string, string> = {
-            'User-Agent': reqUserAgent,
+            ...(reqUserAgent ? { 'User-Agent': reqUserAgent } : {}),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -45,6 +45,7 @@ export async function GET(request: Request) {
             headers['Cookie'] = cookieHeader;
         }
 
+        console.log('HDRezka API Call:', url);
         const response = await fetch(url, { headers });
         const html = await response.text();
         const $ = cheerio.load(html);

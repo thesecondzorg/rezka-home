@@ -1,10 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 
-export default function SearchPage() {
+function SearchPageContent() {
+  const searchParams = useSearchParams();
+  const activeCategory = searchParams.get('category'); // e.g., 'Фильмы'
+  
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -21,7 +25,25 @@ export default function SearchPage() {
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
-      setResults(data.results || []);
+      
+      let finalResults = data.results || [];
+      if (activeCategory) {
+        // Filter by checking if the info text contains the active category
+        // The activeCategory from URL is now in English (Movies, Series, Cartoons)
+        // But the HDRezka return strings are in Russian.
+        const singularCategoryMap: Record<string, string> = {
+          'Movies': 'Фильм',
+          'Series': 'Сериал',
+          'Cartoons': 'Мультфильм'
+        };
+        const searchKeyword = singularCategoryMap[activeCategory] || activeCategory;
+        
+        finalResults = finalResults.filter((r: any) => 
+          r.info && r.info.toLowerCase().includes(searchKeyword.toLowerCase())
+        );
+      }
+      
+      setResults(finalResults);
     } catch (err) {
       console.error(err);
       setError('An error occurred while searching.');
@@ -32,7 +54,16 @@ export default function SearchPage() {
 
   return (
     <div className="flex flex-col items-center w-full max-w-6xl mx-auto space-y-8">
-      <div className="w-full max-w-2xl mt-10">
+      {activeCategory && (
+        <div className="mt-8 mb-2 self-start animate-fade-in">
+          <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-red-500/30 bg-red-500/10 text-red-400 text-sm font-medium shadow-[0_0_15px_-3px_rgba(239,68,68,0.2)]">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            Searching within <strong className="text-red-300">{activeCategory}</strong>
+          </span>
+        </div>
+      )}
+
+      <div className={`w-full max-w-2xl ${activeCategory ? 'mt-4' : 'mt-10'}`}>
         <form onSubmit={handleSearch} className="relative group">
           <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
             <svg className="w-5 h-5 text-gray-400 group-focus-within:text-red-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -110,5 +141,13 @@ export default function SearchPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center p-10 text-gray-400">Loading...</div>}>
+      <SearchPageContent />
+    </Suspense>
   );
 }

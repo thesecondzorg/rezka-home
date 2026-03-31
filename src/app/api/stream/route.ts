@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     // Cookie persistence & User-Agent pass-through
     const reqCookie = request.headers.get('cookie');
     const cookieHeader = process.env.HDREZKA_COOKIE || reqCookie || '';
-    const reqUserAgent = request.headers.get('user-agent') || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0';
+    const reqUserAgent = request.headers.get('user-agent');
 
     try {
         const formData = new URLSearchParams();
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
 
         const headers: Record<string, string> = {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'User-Agent': reqUserAgent,
+            ...(reqUserAgent ? { 'User-Agent': reqUserAgent } : {}),
             'Accept': 'application/json, text/javascript, */*; q=0.01',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -64,7 +64,10 @@ export async function GET(request: Request) {
             headers['Cookie'] = cookieHeader;
         }
 
-        const response = await fetch(`https://hdrezka.name/ajax/get_cdn_series/?t=${Date.now()}`, {
+        const cdnUrl = `https://hdrezka.name/ajax/get_cdn_series/?t=${Date.now()}`;
+        console.log('HDRezka API Call:', cdnUrl, 'Payload:', Object.fromEntries(formData));
+        
+        const response = await fetch(cdnUrl, {
             method: 'POST',
             headers: headers,
             cache: 'no-store',
