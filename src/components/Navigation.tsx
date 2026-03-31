@@ -24,7 +24,7 @@ function NavDropdownContent({ navItem }: { navItem: any }) {
   };
 
   return (
-    <div className="absolute left-0 top-full mt-2 w-[480px] origin-top-left invisible opacity-0 translate-y-2 group-hover:visible group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-50">
+    <div className="absolute left-0 top-full mt-2 w-[640px] origin-top-left invisible opacity-0 translate-y-2 group-hover:visible group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-50">
       <div className="p-6 bg-gray-950/95 backdrop-blur-xl border border-gray-800/60 rounded-2xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.8)] shadow-red-500/5 ring-1 ring-white/10 flex flex-col gap-6">
         
         <div className="flex gap-6">
@@ -34,8 +34,8 @@ function NavDropdownContent({ navItem }: { navItem: any }) {
               <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Genres</h3>
             </div>
             
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-              {navItem.genres.slice(0, 16).map((genre: any) => {
+            <div className="grid grid-cols-3 gap-x-4 gap-y-2">
+              {navItem.genres.map((genre: any) => {
                 let href = genre.value;
                 if (!isBest) {
                   href = href.replace('/best/', '/');
@@ -57,11 +57,11 @@ function NavDropdownContent({ navItem }: { navItem: any }) {
           </div>
 
           {/* Right Column: Quick Links */}
-          <div className="w-1/3 border-l border-gray-800/50 pl-6 flex flex-col gap-4">
+          <div className="w-1/4 border-l border-gray-800/50 pl-6 flex flex-col gap-4">
             <div>
               <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Collections</h3>
               <div className="flex flex-col gap-3">
-                {navItem.quickLinks.slice(0, 5).map((link: any) => (
+                {navItem.quickLinks.map((link: any) => (
                   <Link 
                     key={link.href} 
                     href={link.href}
