@@ -26,7 +26,8 @@ function MoviePageContent() {
     const [selectedEpisode, setSelectedEpisode] = useState<string>('');
     const [showNextEpisodeBtn, setShowNextEpisodeBtn] = useState(false);
     const [theaterMode, setTheaterMode] = useState(false);
-    
+    const [episodePage, setEpisodePage] = useState(0);
+
     // Watchlist State
     const [watchStatus, setWatchStatus] = useState<string | null>(null);
 
@@ -43,14 +44,14 @@ function MoviePageContent() {
     useEffect(() => {
         if (url) {
             fetchDetails(url);
-            
+
             // Fetch initial Watchlist status
             fetch('/api/watchlist')
-              .then(res => res.json())
-              .then(data => {
-                  const item = data.items?.find((i: any) => i.url === url);
-                  if (item) setWatchStatus(item.type);
-              });
+                .then(res => res.json())
+                .then(data => {
+                    const item = data.items?.find((i: any) => i.url === url);
+                    if (item) setWatchStatus(item.type);
+                });
         }
 
         return () => {
@@ -64,6 +65,14 @@ function MoviePageContent() {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, []);
+
+    // Auto-jump episode page when selected episode changes (e.g. restore from saved state)
+    useEffect(() => {
+        if (!selectedSeason || !details?.episodes?.[selectedSeason] || !selectedEpisode) return;
+        const allEps: any[] = details.episodes[selectedSeason];
+        const idx = allEps.findIndex((e: any) => e.id === selectedEpisode);
+        if (idx >= 0) setEpisodePage(Math.floor(idx / 10));
+    }, [selectedEpisode, selectedSeason]);
 
     useEffect(() => {
         if (details && details.translations && !streamLoading && !streamUrl) { // Only auto-set if we haven't already
@@ -390,6 +399,7 @@ function MoviePageContent() {
 
     const handleSeasonChange = (seasonId: string) => {
         setSelectedSeason(seasonId);
+        setEpisodePage(0);
         const firstEp = details.episodes?.[seasonId]?.[0]?.id || '';
         setSelectedEpisode(firstEp);
         saveStateToStorage((existing: any) => {
@@ -537,16 +547,16 @@ function MoviePageContent() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                       url,
-                       title: details.title,
-                       poster: details.poster,
-                       type: 'watching', // automatically upgrade
-                       status: {
-                           seasonId: selectedSeason || undefined,
-                           episodeId: selectedEpisode || undefined,
-                           currentTime,
-                           duration
-                       }
+                        url,
+                        title: details.title,
+                        poster: details.poster,
+                        type: 'watching', // automatically upgrade
+                        status: {
+                            seasonId: selectedSeason || undefined,
+                            episodeId: selectedEpisode || undefined,
+                            currentTime,
+                            duration
+                        }
                     })
                 });
                 if (watchStatus !== 'watching') setWatchStatus('watching');
@@ -654,20 +664,20 @@ function MoviePageContent() {
     }
 
     const toggleWatchList = async (type: string) => {
-       if (!details || !url) return;
-       const newType = watchStatus === type ? 'remove' : type;
-       setWatchStatus(newType === 'remove' ? null : newType);
+        if (!details || !url) return;
+        const newType = watchStatus === type ? 'remove' : type;
+        setWatchStatus(newType === 'remove' ? null : newType);
 
-       await fetch('/api/watchlist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-             url,
-             title: details.title,
-             poster: details.poster,
-             type: newType
-          })
-       });
+        await fetch('/api/watchlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url,
+                title: details.title,
+                poster: details.poster,
+                type: newType
+            })
+        });
     };
 
     return (
@@ -684,27 +694,27 @@ function MoviePageContent() {
                             <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-2">{details.title}</h1>
                             {details.origTitle && <p className="text-xl text-gray-400 font-medium">{details.origTitle}</p>}
                         </div>
-                        
+
                         <div className="flex flex-row gap-2 shrink-0">
-                           <button 
-                             onClick={() => toggleWatchList('plan_to_watch')} 
-                             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border flex gap-2 items-center ${watchStatus === 'plan_to_watch' ? 'bg-gray-800 border-gray-500 text-white shadow-sm' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white'}`}
-                           >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                              </svg>
-                              Plan to Watch
-                           </button>
-                           <button 
-                             onClick={() => toggleWatchList('watching')} 
-                             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border flex gap-2 items-center ${watchStatus === 'watching' ? 'bg-red-600/10 border-red-500 text-white shadow-sm' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white hover:border-red-500/50'}`}
-                           >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              Watching
-                           </button>
+                            <button
+                                onClick={() => toggleWatchList('plan_to_watch')}
+                                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border flex gap-2 items-center ${watchStatus === 'plan_to_watch' ? 'bg-gray-800 border-gray-500 text-white shadow-sm' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white'}`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                </svg>
+                                Plan to Watch
+                            </button>
+                            <button
+                                onClick={() => toggleWatchList('watching')}
+                                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border flex gap-2 items-center ${watchStatus === 'watching' ? 'bg-red-600/10 border-red-500 text-white shadow-sm' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-white hover:border-red-500/50'}`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Watching
+                            </button>
                         </div>
                     </div>
 
@@ -748,32 +758,70 @@ function MoviePageContent() {
                                 ))}
                             </div>
 
-                            {/* Episodes */}
-                            {selectedSeason && details.episodes?.[selectedSeason] && (
-                                <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2 bg-gray-900/50 rounded-lg border border-gray-800/50">
-                                    {details.episodes[selectedSeason].map((e: any) => (
+                            {/* Episodes — paginated strip */}
+                            {selectedSeason && details.episodes?.[selectedSeason] && (() => {
+                                const PAGE_SIZE = 10;
+                                const allEps: any[] = details.episodes[selectedSeason];
+                                const totalPages = Math.ceil(allEps.length / PAGE_SIZE);
+                                const page = Math.min(episodePage, totalPages - 1);
+                                const pageEps = allEps.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+                                return (
+                                    <div className="flex items-center gap-2">
+                                        {/* Prev page button */}
                                         <button
-                                            key={e.id}
-                                            onClick={() => handleEpisodeChange(e.id)}
-                                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors border ${selectedEpisode === e.id
-                                                ? 'bg-red-600 text-white border-red-500'
-                                                : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-700'
-                                                }`}
+                                            onClick={() => setEpisodePage(p => Math.max(0, p - 1))}
+                                            disabled={page === 0}
+                                            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:border-gray-500 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                                         >
-                                            {e.name}
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                            </svg>
                                         </button>
-                                    ))}
-                                </div>
-                            )}
+
+                                        {/* Episode buttons for this page */}
+                                        <div className="flex gap-1.5 overflow-hidden">
+                                            {pageEps.map((e: any) => (
+                                                <button
+                                                    key={e.id}
+                                                    onClick={() => { handleEpisodeChange(e.id); }}
+                                                    className={`shrink-0 w-20 h-10 text-xs font-medium rounded-lg transition-colors border flex items-center justify-center ${selectedEpisode === e.id
+                                                        ? 'bg-red-600 text-white border-red-500'
+                                                        : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-700'
+                                                        }`}
+                                                >
+                                                    {e.name}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Next page button */}
+                                        <button
+                                            onClick={() => setEpisodePage(p => Math.min(totalPages - 1, p + 1))}
+                                            disabled={page >= totalPages - 1}
+                                            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:border-gray-500 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                            </svg>
+                                        </button>
+
+                                        {/* Page indicator */}
+                                        {totalPages > 1 && (
+                                            <span className="text-xs text-gray-500 shrink-0 pl-1">
+                                                {page + 1} / {totalPages}
+                                            </span>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     )}
 
                     {/* Player Container */}
                     <div className={`mb-8 bg-black relative flex items-center justify-center group transition-all duration-300
-                        ${
-                            theaterMode
-                                ? 'fixed top-16 left-0 right-0 bottom-0 z-40 rounded-none border-0 shadow-none'
-                                : 'w-full rounded-2xl overflow-hidden shadow-2xl border border-gray-800 aspect-video'
+                        ${theaterMode
+                            ? 'fixed top-16 left-0 right-0 bottom-0 z-40 rounded-none border-0 shadow-none'
+                            : 'w-full rounded-2xl overflow-hidden shadow-2xl border border-gray-800 aspect-video'
                         }`}>
                         {/* Video element is ALWAYS mounted to preserve fullscreen */}
                         <video
