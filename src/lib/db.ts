@@ -36,6 +36,53 @@ export function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id),
       UNIQUE(user_id, url)
     );
+
+    CREATE TABLE IF NOT EXISTS catalog (
+      id TEXT PRIMARY KEY, -- usually the numeric ID from HDRezka or numeric part of URL
+      url TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      orig_title TEXT,
+      poster TEXT,
+      type TEXT, -- 'movie', 'series', etc.
+      year INTEGER,
+      genres TEXT, -- comma-separated list
+      translations TEXT, -- JSON string
+      seasons TEXT, -- JSON string
+      episodes TEXT, -- JSON string
+      last_indexed_at INTEGER
+    );
+
+    -- Virtual table for Full-Text Search on titles
+    CREATE VIRTUAL TABLE IF NOT EXISTS catalog_fts USING fts5(
+      id UNINDEXED,
+      title,
+      orig_title,
+      content='catalog',
+      content_rowid='id'
+    );
+
+    -- Trigger to keep FTS index in sync
+    CREATE TRIGGER IF NOT EXISTS catalog_ai AFTER INSERT ON catalog BEGIN
+      INSERT INTO catalog_fts(rowid, id, title, orig_title) VALUES (new.rowid, new.id, new.title, new.orig_title);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS catalog_ad AFTER DELETE ON catalog BEGIN
+      INSERT INTO catalog_fts(catalog_fts, rowid, id, title, orig_title) VALUES('delete', old.rowid, old.id, old.title, old.orig_title);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS catalog_au AFTER UPDATE ON catalog BEGIN
+      INSERT INTO catalog_fts(catalog_fts, rowid, id, title, orig_title) VALUES('delete', old.rowid, old.id, old.title, old.orig_title);
+      INSERT INTO catalog_fts(rowid, id, title, orig_title) VALUES (new.rowid, new.id, new.title, new.orig_title);
+    END;
+
+    CREATE TABLE IF NOT EXISTS sync_state (
+      name TEXT PRIMARY KEY,
+      current_page INTEGER DEFAULT 1,
+      total_pages INTEGER DEFAULT 0,
+      items_indexed INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'idle', -- 'running', 'idle', 'paused', 'finished'
+      last_updated INTEGER
+    );
   `);
 
   // Seed default user if Database is freshly created
