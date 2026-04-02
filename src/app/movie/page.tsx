@@ -25,6 +25,7 @@ function MoviePageContent() {
     const [selectedSeason, setSelectedSeason] = useState<string>('');
     const [selectedEpisode, setSelectedEpisode] = useState<string>('');
     const [showNextEpisodeBtn, setShowNextEpisodeBtn] = useState(false);
+    const [theaterMode, setTheaterMode] = useState(false);
     
     // Watchlist State
     const [watchStatus, setWatchStatus] = useState<string | null>(null);
@@ -56,6 +57,13 @@ function MoviePageContent() {
             if (dbSyncTimeoutRef.current) clearTimeout(dbSyncTimeoutRef.current);
         }
     }, [url]);
+
+    // Exit theater mode on Escape key
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTheaterMode(false); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
 
     useEffect(() => {
         if (details && details.translations && !streamLoading && !streamUrl) { // Only auto-set if we haven't already
@@ -663,7 +671,7 @@ function MoviePageContent() {
     };
 
     return (
-        <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
+        <div className={`animate-in fade-in duration-500 ${theaterMode ? 'max-w-none' : 'max-w-5xl mx-auto'}`}>
             <Link href="/" className="inline-flex items-center text-gray-400 hover:text-white mb-8 transition-colors">
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                 Back to Search
@@ -761,7 +769,12 @@ function MoviePageContent() {
                     )}
 
                     {/* Player Container */}
-                    <div className="w-full bg-black mb-8 rounded-2xl overflow-hidden shadow-2xl border border-gray-800 relative aspect-video flex items-center justify-center group">
+                    <div className={`mb-8 bg-black relative flex items-center justify-center group transition-all duration-300
+                        ${
+                            theaterMode
+                                ? 'fixed top-16 left-0 right-0 bottom-0 z-40 rounded-none border-0 shadow-none'
+                                : 'w-full rounded-2xl overflow-hidden shadow-2xl border border-gray-800 aspect-video'
+                        }`}>
                         {/* Video element is ALWAYS mounted to preserve fullscreen */}
                         <video
                             ref={videoRef}
@@ -871,7 +884,29 @@ function MoviePageContent() {
                                 )}
                             </div>
                         )}
+
+                        {/* Theater Mode Toggle */}
+                        <button
+                            onClick={() => setTheaterMode(t => !t)}
+                            title={theaterMode ? 'Exit theater mode (Esc)' : 'Theater mode'}
+                            className="absolute top-4 left-4 z-20 bg-black/70 hover:bg-black/90 text-white backdrop-blur-md p-1.5 rounded-lg border border-white/10 transition-all shadow-lg opacity-0 group-hover:opacity-100"
+                        >
+                            {theaterMode ? (
+                                // Compress icon
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                                </svg>
+                            ) : (
+                                // Expand icon
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                                </svg>
+                            )}
+                        </button>
                     </div>
+
+                    {/* Spacer to push content below the fixed theater-mode player */}
+                    {theaterMode && <div style={{ height: 'calc(100vh - 4rem)' }} />}
 
                     {/* Movie details */}
                     <div className="bg-gray-900/30 rounded-2xl border border-gray-800 p-6 md:p-8">
