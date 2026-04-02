@@ -83,6 +83,7 @@ export function initDb() {
       total_pages INTEGER DEFAULT 0,
       items_indexed INTEGER DEFAULT 0,
       error_count INTEGER DEFAULT 0,
+      missed_pages INTEGER DEFAULT 0,
       last_error TEXT,
       status TEXT DEFAULT 'idle', -- 'running', 'idle', 'paused', 'finished', 'error'
       last_updated INTEGER
@@ -101,6 +102,9 @@ export function initDb() {
   }
   if (!columnNames.includes('last_error')) {
     db.exec("ALTER TABLE sync_state ADD COLUMN last_error TEXT;");
+  }
+  if (!columnNames.includes('missed_pages')) {
+    db.exec("ALTER TABLE sync_state ADD COLUMN missed_pages INTEGER DEFAULT 0;");
   }
 
   // Migrations for catalog columns
