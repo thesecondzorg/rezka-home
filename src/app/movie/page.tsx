@@ -19,6 +19,7 @@ function MoviePageContent() {
     const [streams, setStreams] = useState<any[]>([]);
     const [currentQuality, setCurrentQuality] = useState<string>('');
     const [streamLoading, setStreamLoading] = useState(false);
+    const [streamError, setStreamError] = useState<string>('');
     const [showQualities, setShowQualities] = useState(false);
     const [selectedTranslatorId, setSelectedTranslatorId] = useState<string>('');
     const [selectedSeason, setSelectedSeason] = useState<string>('');
@@ -32,6 +33,11 @@ function MoviePageContent() {
     const hlsRef = useRef<Hls | null>(null);
     const lowBufferSinceRef = useRef<number | null>(null);
     const dbSyncTimeoutRef = useRef<any>(null);
+    // Refs to avoid stale closures in the ABR interval without restarting it
+    const currentQualityRef = useRef<string>('');
+    const streamsRef = useRef<any[]>([]);
+    // Store last stream params so retry can replay them
+    const lastStreamParamsRef = useRef<{ movieId: string; translatorId: string; season?: string; episode?: string; action?: string } | null>(null);
 
     useEffect(() => {
         if (url) {
@@ -239,6 +245,9 @@ function MoviePageContent() {
 
     const fetchStream = async (specificMovieId: string, translatorId: string, season?: string, episode?: string, action?: string) => {
         setStreamLoading(true);
+        setStreamError('');
+        // Persist params so the retry button can replay this exact call
+        lastStreamParamsRef.current = { movieId: specificMovieId, translatorId, season, episode, action };
         try {
             let urlToFetch = `/api/stream?id=${specificMovieId}&translator_id=${translatorId}`;
             if (season && episode) {
@@ -252,7 +261,7 @@ function MoviePageContent() {
             }
             urlToFetch += `&_t=${Date.now()}`; // Cache buster
             const res = await fetch(urlToFetch);
-            if (!res.ok) throw new Error('Stream fetch failed');
+            if (!res.ok) throw new Error(`Server returned ${res.status}`);
             const data = await res.json();
 
             if (data.streams && data.streams.length > 0) {
@@ -328,15 +337,15 @@ function MoviePageContent() {
                     }
                 }, 500);
             } else {
-                alert('No compatible streams found.');
+                setStreamError('No compatible streams found for this title.');
                 setStreams([]);
                 setStreamUrl('');
                 setCurrentQuality('');
             }
 
-        } catch (err) {
-            console.error(err);
-            setError('An error occurred while fetching the stream.');
+        } catch (err: any) {
+            console.error('[Stream] Fetch error:', err);
+            setStreamError(err?.message || 'Failed to load stream. Please try again.');
         } finally {
             setStreamLoading(false);
         }
@@ -361,8 +370,13 @@ function MoviePageContent() {
             };
         });
 
-        // Use get_episodes to fetch translator-specific episode list + try to maintain current episode
-        fetchStream(mId, tId, selectedSeason || undefined, selectedEpisode || undefined, 'get_episodes');
+        // For series: use get_episodes to fetch translator-specific episode list
+        // For movies: use get_movie — get_episodes will return nothing for plain movies
+        if (details?.isSeries) {
+            fetchStream(mId, tId, selectedSeason || undefined, selectedEpisode || undefined, 'get_episodes');
+        } else {
+            fetchStream(mId, tId, undefined, undefined, 'get_movie');
+        }
         setShowQualities(false);
     };
 
@@ -418,58 +432,72 @@ function MoviePageContent() {
         setShowNextEpisodeBtn(false);
     };
 
+    // Keep refs in sync so the ABR interval always reads latest values without restarting
+    useEffect(() => { currentQualityRef.current = currentQuality; }, [currentQuality]);
+    useEffect(() => { streamsRef.current = streams; }, [streams]);
+
     // === Independent buffer health monitor (runs even when video is stalled) ===
+    // Deps are ONLY the stream URLs — quality/streams changes are handled via refs above
     useEffect(() => {
         if (!streamUrl && !streamHlsUrl) return;
 
-        console.log(`[ABR] Monitor started — streamUrl: ${!!streamUrl}, hlsUrl: ${!!streamHlsUrl}, streams: ${streams.length}, quality: ${currentQuality}`);
+        // Reset counters when stream source changes
+        lowBufferSinceRef.current = null;
+        // Track whether we've seen a healthy buffer yet (avoids false positives right after stream load)
+        let hasSeenHealthyBuffer = false;
+
+        console.log(`[ABR] Monitor started — streamUrl: ${!!streamUrl}, hlsUrl: ${!!streamHlsUrl}`);
 
         const interval = setInterval(() => {
-            if (currentQuality === 'Auto (ABR)') return; // Let hls.js handle this natively
+            const quality = currentQualityRef.current;
+            const streamsList = streamsRef.current;
+
+            if (quality === 'Auto (ABR)') return; // Let hls.js handle this natively
 
             const video = videoRef.current;
-            if (!video) { console.log('[ABR] No video ref'); return; }
-            if (video.paused) { console.log('[ABR] Video is paused, skipping'); return; }
-            if (!video.duration) { console.log('[ABR] No duration yet'); return; }
-            if (video.currentTime < 1) { console.log('[ABR] Still in first second'); return; }
-            if (streams.length <= 1) { console.log('[ABR] Only 1 stream available, nothing to downgrade to'); return; }
+            if (!video) return;
+            if (video.paused) return;
+            if (!video.duration) return;
+            if (video.currentTime < 3) return; // Give player time to fill buffer initially
+            if (streamsList.length <= 1) return;
 
             // Calculate how many seconds of video are buffered ahead
             let bufferAhead = 0;
-            const bufferedRanges = [];
             for (let i = 0; i < video.buffered.length; i++) {
-                bufferedRanges.push(`[${video.buffered.start(i).toFixed(1)}-${video.buffered.end(i).toFixed(1)}]`);
                 if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) > video.currentTime) {
                     bufferAhead = video.buffered.end(i) - video.currentTime;
                 }
             }
 
-            const lowForMs = lowBufferSinceRef.current ? Date.now() - lowBufferSinceRef.current : 0;
-            console.log(`[ABR] time: ${video.currentTime.toFixed(1)}s | buffer ahead: ${bufferAhead.toFixed(1)}s | ranges: ${bufferedRanges.join(', ')} | quality: ${currentQuality} | low for: ${lowForMs}ms`);
+            // Don't start degradation logic until we've seen a healthy buffer at least once
+            // This prevents downgrading immediately after stream load when buffer is still filling
+            if (bufferAhead >= 5) {
+                hasSeenHealthyBuffer = true;
+            }
+
+            if (!hasSeenHealthyBuffer) return;
 
             // If buffer is dangerously low (< 2 seconds ahead)
             if (bufferAhead < 2) {
                 if (lowBufferSinceRef.current === null) {
                     console.log('[ABR] ⚠️ Buffer dropped below 2s — starting countdown');
                     lowBufferSinceRef.current = Date.now();
-                } else if (Date.now() - lowBufferSinceRef.current > 5000) {
-                    console.log(`[ABR] 🔻 Buffer critically low for 5s+, DOWNGRADING from ${currentQuality}`);
+                } else if (Date.now() - lowBufferSinceRef.current > 8000) {
+                    console.log(`[ABR] 🔻 Buffer critically low for 8s+, DOWNGRADING from ${quality}`);
                     lowBufferSinceRef.current = null;
+                    hasSeenHealthyBuffer = false; // require re-stabilization after downgrade
                     downgradeQuality();
                 }
             } else {
-                if (lowBufferSinceRef.current !== null) {
-                    console.log('[ABR] ✅ Buffer recovered, resetting countdown');
-                }
                 lowBufferSinceRef.current = null;
             }
-        }, 1000);
+        }, 2000);
 
         return () => {
             console.log('[ABR] Monitor cleaned up');
             clearInterval(interval);
         };
-    }, [streamUrl, streamHlsUrl, streams, currentQuality]);
+    }, [streamUrl, streamHlsUrl]);
 
     const handleTimeUpdate = () => {
         if (!videoRef.current) return;
@@ -758,8 +786,8 @@ function MoviePageContent() {
                             </div>
                         )}
 
-                        {/* Poster Fallback Overlay (when no stream loaded) */}
-                        {!streamUrl && !streamHlsUrl && !streamLoading && (
+                        {/* Poster Fallback Overlay (when no stream loaded and no error) */}
+                        {!streamUrl && !streamHlsUrl && !streamLoading && !streamError && (
                             <div className="absolute inset-0 z-20 flex items-center justify-center">
                                 {details.poster && (
                                     <img src={details.poster} alt="Poster fallback" className="absolute inset-0 w-full h-full object-cover opacity-30" />
@@ -767,6 +795,38 @@ function MoviePageContent() {
                                 <div className="text-gray-300 flex flex-col items-center relative z-10 bg-black/50 p-6 rounded-xl backdrop-blur-sm">
                                     <svg className="w-16 h-16 mb-4 opacity-50" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
                                     <p>Select a translation to start watching</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Stream Error Retry Overlay */}
+                        {streamError && !streamLoading && (
+                            <div className="absolute inset-0 z-30 bg-black/85 flex flex-col items-center justify-center gap-5 animate-in fade-in duration-300">
+                                {details.poster && (
+                                    <img src={details.poster} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" />
+                                )}
+                                <div className="relative z-10 flex flex-col items-center gap-5 px-8 text-center">
+                                    <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
+                                        <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-white font-semibold text-base mb-1">Stream unavailable</p>
+                                        <p className="text-gray-400 text-sm max-w-xs">{streamError}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const p = lastStreamParamsRef.current;
+                                            if (p) fetchStream(p.movieId, p.translatorId, p.season, p.episode, p.action);
+                                        }}
+                                        className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-gray-100 active:scale-95 text-black text-sm font-bold rounded-xl transition-all shadow-lg"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        Retry
+                                    </button>
                                 </div>
                             </div>
                         )}

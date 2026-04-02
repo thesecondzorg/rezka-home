@@ -36,7 +36,7 @@ export default function RootLayout({
             </div>
             
             {/* Desktop Center / Mobile Bottom */}
-            <div className="flex flex-1 justify-start md:justify-center w-full md:w-auto overflow-x-auto pb-2 md:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex flex-1 justify-start md:justify-center w-full md:w-auto overflow-x-auto md:overflow-visible pb-2 md:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               <Navigation />
             </div>
 
