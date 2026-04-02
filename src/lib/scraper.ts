@@ -9,9 +9,32 @@ export interface CatalogItem {
     type?: string;
     year?: number;
     genres?: string;
+    country?: string;
     translations?: string; // JSON
     seasons?: string; // JSON
     episodes?: string; // JSON
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+        
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} at ${url}`);
+        }
+        return response;
+    } catch (err) {
+        if (retries > 0) {
+            console.log(`[Scraper] Retrying ${url} (${retries} left)`);
+            await new Promise(r => setTimeout(r, 2000));
+            return fetchWithRetry(url, options, retries - 1);
+        }
+        throw err;
+    }
 }
 
 export async function fetchPageDetails(url: string, userAgent?: string): Promise<Partial<CatalogItem>> {
@@ -23,7 +46,7 @@ export async function fetchPageDetails(url: string, userAgent?: string): Promise
     };
     if (userAgent) headers['User-Agent'] = userAgent;
 
-    const response = await fetch(fullUrl, { headers });
+    const response = await fetchWithRetry(fullUrl, { headers });
     const html = await response.text();
     const $ = cheerio.load(html);
 
@@ -41,6 +64,7 @@ export async function fetchPageDetails(url: string, userAgent?: string): Promise
     const yearMatch = info['Дата выхода']?.match(/\d{4}/) || info['Год']?.match(/\d{4}/);
     const year = yearMatch ? parseInt(yearMatch[0]) : undefined;
     const genres = info['Жанр'];
+    const country = info['Страна'];
 
     // Extract translations
     const translations: any[] = [];
@@ -87,6 +111,7 @@ export async function fetchPageDetails(url: string, userAgent?: string): Promise
         poster,
         year,
         genres,
+        country,
         translations: JSON.stringify(translations),
         seasons: JSON.stringify(seasons),
         episodes: JSON.stringify(episodes),
@@ -101,7 +126,7 @@ export async function fetchCatalogPage(path: string, userAgent?: string) {
     };
     if (userAgent) headers['User-Agent'] = userAgent;
 
-    const response = await fetch(url, { headers });
+    const response = await fetchWithRetry(url, { headers });
     const html = await response.text();
     const $ = cheerio.load(html);
 

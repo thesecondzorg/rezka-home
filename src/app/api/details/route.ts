@@ -45,8 +45,10 @@ export async function GET(request: Request) {
             headers['Cookie'] = cookieHeader;
         }
 
-        console.log('HDRezka API Call:', url);
-        const response = await fetch(url, { headers });
+        // Normalize URL to handle relative paths
+        const fullUrl = url.startsWith('http') ? url : `https://hdrezka.name${url.startsWith('/') ? url : '/' + url}`;
+        console.log('HDRezka API Call:', fullUrl);
+        const response = await fetch(fullUrl, { headers });
         const html = await response.text();
         const $ = cheerio.load(html);
 

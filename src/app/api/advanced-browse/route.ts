@@ -7,6 +7,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const includeGenresStr = searchParams.get('includeGenres') || '';
     const excludeGenresStr = searchParams.get('excludeGenres') || '';
+    const includeCountriesStr = searchParams.get('includeCountries') || '';
+    const excludeCountriesStr = searchParams.get('excludeCountries') || '';
     const typesStr = searchParams.get('types') || '';
     const page = parseInt(searchParams.get('page') || '1');
     const limit = 50;
@@ -14,6 +16,8 @@ export async function GET(request: Request) {
 
     const includeGenres = includeGenresStr ? includeGenresStr.split(',') : [];
     const excludeGenres = excludeGenresStr ? excludeGenresStr.split(',') : [];
+    const includeCountries = includeCountriesStr ? includeCountriesStr.split(',') : [];
+    const excludeCountries = excludeCountriesStr ? excludeCountriesStr.split(',') : [];
     const types = typesStr ? typesStr.split(',') : [];
 
     let query = `
@@ -29,7 +33,7 @@ export async function GET(request: Request) {
         params.push(...types);
     }
 
-    // Filter by INCLUSIONS (AND matching - strict match)
+    // Filter by GENRE INCLUSIONS (AND matching - strict match)
     if (includeGenres.length > 0) {
         for (const genre of includeGenres) {
             query += ` AND c.genres LIKE ?`;
@@ -37,11 +41,25 @@ export async function GET(request: Request) {
         }
     }
 
-    // Filter by EXCLUSIONS
+    // Filter by GENRE EXCLUSIONS
     if (excludeGenres.length > 0) {
         for (const genre of excludeGenres) {
             query += ` AND c.genres NOT LIKE ?`;
             params.push(`%${genre}%`);
+        }
+    }
+
+    // Filter by COUNTRY INCLUSIONS (ANY matching - OR logic for multiple countries)
+    if (includeCountries.length > 0) {
+        query += ` AND (${includeCountries.map(() => 'c.country LIKE ?').join(' OR ')})`;
+        params.push(...includeCountries.map(c => `%${c}%`));
+    }
+
+    // Filter by COUNTRY EXCLUSIONS
+    if (excludeCountries.length > 0) {
+        for (const country of excludeCountries) {
+            query += ` AND (c.country NOT LIKE ? OR c.country IS NULL)`;
+            params.push(`%${country}%`);
         }
     }
 

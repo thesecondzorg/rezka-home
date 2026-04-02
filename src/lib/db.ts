@@ -46,6 +46,7 @@ export function initDb() {
       type TEXT, -- 'movie', 'series', etc.
       year INTEGER,
       genres TEXT, -- comma-separated list
+      country TEXT,
       translations TEXT, -- JSON string
       seasons TEXT, -- JSON string
       episodes TEXT, -- JSON string
@@ -78,12 +79,36 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS sync_state (
       name TEXT PRIMARY KEY,
       current_page INTEGER DEFAULT 1,
+      current_category TEXT,
       total_pages INTEGER DEFAULT 0,
       items_indexed INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'idle', -- 'running', 'idle', 'paused', 'finished'
+      error_count INTEGER DEFAULT 0,
+      last_error TEXT,
+      status TEXT DEFAULT 'idle', -- 'running', 'idle', 'paused', 'finished', 'error'
       last_updated INTEGER
     );
   `);
+
+  // Migrations for sync_state columns added later
+  const tableInfo = db.prepare("PRAGMA table_info(sync_state)").all() as any[];
+  const columnNames = tableInfo.map(c => c.name);
+  
+  if (!columnNames.includes('current_category')) {
+    db.exec("ALTER TABLE sync_state ADD COLUMN current_category TEXT;");
+  }
+  if (!columnNames.includes('error_count')) {
+    db.exec("ALTER TABLE sync_state ADD COLUMN error_count INTEGER DEFAULT 0;");
+  }
+  if (!columnNames.includes('last_error')) {
+    db.exec("ALTER TABLE sync_state ADD COLUMN last_error TEXT;");
+  }
+
+  // Migrations for catalog columns
+  const catalogInfo = db.prepare("PRAGMA table_info(catalog)").all() as any[];
+  const catalogColumns = catalogInfo.map(c => c.name);
+  if (!catalogColumns.includes('country')) {
+    db.exec("ALTER TABLE catalog ADD COLUMN country TEXT;");
+  }
 
   // Seed default user if Database is freshly created
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };

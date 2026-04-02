@@ -27,3 +27,16 @@ export const allTypes = [
   { value: 'movie', label: 'Movies' },
   { value: 'series', label: 'Series' }
 ];
+
+export const allCountries = [
+  { value: 'США', label: 'USA' },
+  { value: 'Россия', label: 'Russia' },
+  { value: 'Великобритания', label: 'UK' },
+  { value: 'Франция', label: 'France' },
+  { value: 'Германия', label: 'Germany' },
+  { value: 'Япония', label: 'Japan' },
+  { value: 'Корея Южная', label: 'South Korea' },
+  { value: 'Канада', label: 'Canada' },
+  { value: 'Испания', label: 'Spain' },
+  { value: 'Италия', label: 'Italy' },
+];

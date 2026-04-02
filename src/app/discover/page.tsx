@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { allGenres, allTypes } from '@/data/genres';
+import { allGenres, allTypes, allCountries } from '@/data/genres';
 
 type ToggleState = 'neutral' | 'include' | 'exclude';
 
 export default function DiscoverPage() {
     const [genreStates, setGenreStates] = useState<Record<string, ToggleState>>({});
     const [typeStates, setTypeStates] = useState<Record<string, ToggleState>>({});
+    const [countryStates, setCountryStates] = useState<Record<string, ToggleState>>({});
     
     const [results, setResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -28,10 +29,17 @@ export default function DiscoverPage() {
         }));
     };
 
+    const handleCountryClick = (value: string) => {
+        setCountryStates(prev => ({
+            ...prev,
+            [value]: toggleState(prev[value] || 'neutral')
+        }));
+    };
+
     const handleTypeClick = (value: string) => {
         setTypeStates(prev => ({
             ...prev,
-            [value]: prev[value] === 'include' ? 'neutral' : 'include' // types don't need 'exclude' since there's only a few
+            [value]: prev[value] === 'include' ? 'neutral' : 'include'
         }));
     };
 
@@ -40,13 +48,17 @@ export default function DiscoverPage() {
         const currentPage = resetPage ? 1 : page;
         
         try {
-            const includes = Object.keys(genreStates).filter(k => genreStates[k] === 'include');
-            const excludes = Object.keys(genreStates).filter(k => genreStates[k] === 'exclude');
+            const includeGenres = Object.keys(genreStates).filter(k => genreStates[k] === 'include');
+            const excludeGenres = Object.keys(genreStates).filter(k => genreStates[k] === 'exclude');
+            const includeCountries = Object.keys(countryStates).filter(k => countryStates[k] === 'include');
+            const excludeCountries = Object.keys(countryStates).filter(k => countryStates[k] === 'exclude');
             const types = Object.keys(typeStates).filter(k => typeStates[k] === 'include');
 
             const params = new URLSearchParams();
-            if (includes.length) params.append('includeGenres', includes.join(','));
-            if (excludes.length) params.append('excludeGenres', excludes.join(','));
+            if (includeGenres.length) params.append('includeGenres', includeGenres.join(','));
+            if (excludeGenres.length) params.append('excludeGenres', excludeGenres.join(','));
+            if (includeCountries.length) params.append('includeCountries', includeCountries.join(','));
+            if (excludeCountries.length) params.append('excludeCountries', excludeCountries.join(','));
             if (types.length) params.append('types', types.join(','));
             params.append('page', currentPage.toString());
 
@@ -66,7 +78,7 @@ export default function DiscoverPage() {
     // Refetch when filters change
     useEffect(() => {
         fetchResults(true);
-    }, [genreStates, typeStates]);
+    }, [genreStates, typeStates, countryStates]);
 
     const getBtnStyle = (state: ToggleState) => {
         if (state === 'include') return 'bg-green-600/20 text-green-400 border-green-600/50 hover:bg-green-600/30';
@@ -84,7 +96,7 @@ export default function DiscoverPage() {
         <div className="flex flex-col md:flex-row gap-8 w-full max-w-7xl mx-auto items-start animate-in fade-in duration-700">
             
             {/* Filter Sidebar */}
-            <div className="w-full md:w-80 flex flex-col gap-6 sticky top-24 shrink-0">
+            <div className="w-full md:w-80 flex flex-col gap-6 sticky top-24 shrink-0 overflow-y-auto max-h-[calc(100vh-120px)] pr-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-800 [&::-webkit-scrollbar-track]:bg-transparent">
                 <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-6 backdrop-blur-xl">
                     <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                         <span className="w-2 h-6 bg-red-600 rounded-full"></span>
@@ -103,6 +115,25 @@ export default function DiscoverPage() {
                                         className={`px-3 py-1.5 text-sm font-semibold rounded-lg border transition-all ${getBtnStyle(state)}`}
                                     >
                                         {type.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="mb-6">
+                        <h3 className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-3">Countries</h3>
+                        <div className="flex flex-wrap gap-2">
+                            {allCountries.map(country => {
+                                const state = countryStates[country.value] || 'neutral';
+                                return (
+                                    <button
+                                        key={country.value}
+                                        onClick={() => handleCountryClick(country.value)}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border transition-all ${getBtnStyle(state)}`}
+                                    >
+                                        <span className="text-[10px] opacity-70 w-2 text-center">{getBtnIcon(state)}</span>
+                                        {country.label}
                                     </button>
                                 );
                             })}
@@ -171,9 +202,14 @@ export default function DiscoverPage() {
                                     <h3 className="text-sm font-semibold text-gray-100 group-hover:text-red-400 transition-colors line-clamp-2 mb-1">
                                         {result.title}
                                     </h3>
-                                    <p className="text-xs text-gray-500 mt-auto line-clamp-1">
-                                        {result.genres || result.type}
-                                    </p>
+                                    <div className="flex flex-col gap-1 mt-auto">
+                                        <p className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">
+                                            {result.country || 'Unknown Country'}
+                                        </p>
+                                        <p className="text-xs text-gray-500 line-clamp-1">
+                                            {result.genres || result.type}
+                                        </p>
+                                    </div>
                                 </div>
                             </Link>
                         ))}

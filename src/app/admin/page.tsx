@@ -55,7 +55,8 @@ export default function AdminPage() {
                         <div className="flex justify-between items-center text-sm">
                             <span className="text-gray-400 font-medium">Status</span>
                             <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                                status?.status === 'running' ? 'bg-green-500/20 text-green-400' : 'bg-gray-800 text-gray-400'
+                                status?.status === 'running' ? 'bg-green-500/20 text-green-400' : 
+                                status?.status === 'error' ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 text-gray-400'
                             }`}>
                                 {status?.status || 'idle'}
                             </span>
@@ -67,9 +68,25 @@ export default function AdminPage() {
                         </div>
 
                         <div className="flex justify-between items-center text-sm">
-                            <span className="text-gray-400 font-medium">Current Page</span>
-                            <span className="text-white font-mono">{status?.current_page || 1}</span>
+                            <span className="text-gray-400 font-medium">Progress</span>
+                            <span className="text-white font-mono truncate max-w-[150px]">
+                                {status?.current_category || 'N/A'} (p{status?.current_page || 1})
+                            </span>
                         </div>
+
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-gray-400 font-medium">Errors</span>
+                            <span className={`font-mono ${status?.error_count > 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                                {status?.error_count || 0}
+                            </span>
+                        </div>
+
+                        {status?.last_error && (
+                            <div className="mt-4 p-3 bg-red-950/30 border border-red-900/30 rounded-xl">
+                                <p className="text-[10px] text-red-400/80 uppercase font-bold mb-1">Last Error</p>
+                                <p className="text-xs text-red-200/70 line-clamp-2 italic">"{status.last_error}"</p>
+                            </div>
+                        )}
 
                         {status?.last_updated && (
                             <div className="flex justify-between items-center text-sm pt-2">
