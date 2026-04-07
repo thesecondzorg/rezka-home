@@ -82,33 +82,32 @@ function MoviePageContent() {
         return () => window.removeEventListener('keydown', onKey);
     }, []);
 
-    // Xbox Controller Binding - Button X (index 2) triggers Next Episode
+    // Xbox & Media Session Integration - Enable native system controls and remotes
     useEffect(() => {
-        if (typeof window === 'undefined') return;
-        const isXbox = /Xbox/i.test(navigator.userAgent);
-        const hasGamepadAPI = !!navigator.getGamepads;
-        if (!isXbox && !hasGamepadAPI) return;
+        if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
-        let rafId: number;
-        let lastPressed = false;
+        // Register action handlers for Next Track (standard skip episode signal)
+        navigator.mediaSession.setActionHandler('nexttrack', () => {
+            console.log('[MediaSession] Next track signal — triggering episode skip');
+            handleVideoEnded();
+        });
 
-        const pollGamepad = () => {
-            const gamepads = navigator.getGamepads();
-            const gp = gamepads[0]; // Primary controller
-            if (gp && gp.buttons && gp.buttons[2]) {
-                const isPressed = gp.buttons[2].pressed;
-                if (isPressed && !lastPressed) {
-                    console.log('[Xbox] Button X pressed - Next Episode');
-                    handleVideoEnded();
-                }
-                lastPressed = isPressed;
+        // Set Metadata for the System Overlay / Media Remote
+        if (details) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: details.title,
+                artist: details.year || 'HDRezka',
+                album: details.isSeries ? (selectedSeason ? `Season ${selectedSeason}` : 'Series') : 'Movie',
+                artwork: details.poster ? [{ src: details.poster }] : []
+            });
+        }
+
+        return () => {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.setActionHandler('nexttrack', null);
             }
-            rafId = requestAnimationFrame(pollGamepad);
         };
-
-        rafId = requestAnimationFrame(pollGamepad);
-        return () => cancelAnimationFrame(rafId);
-    }, [details, selectedSeason, selectedEpisode]); // Re-run to keep handleVideoEnded closure fresh
+    }, [details, selectedSeason, selectedEpisode]); // Re-attach when content changes
 
     // Diagnostics / Reload Tracking
     useEffect(() => {
