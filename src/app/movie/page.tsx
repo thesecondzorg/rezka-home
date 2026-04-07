@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Hls from 'hls.js';
+import { MovieInfo } from '@/components/movie/MovieInfo';
+import { MovieHeader } from '@/components/movie/MovieHeader';
 
 
 function MoviePageContent() {
@@ -743,120 +745,13 @@ function MoviePageContent() {
                      </button>
                  </div>
             )}
-            {/* Backdrop Section (only if TMDB data available) */}
-            {tmdbData?.backdropPath && !theaterMode && (
-                <div className="absolute inset-x-0 top-0 h-[70vh] -z-10 overflow-hidden">
-                    <img
-                        src={tmdbData.backdropPath}
-                        alt="backdrop"
-                        className="w-full h-full object-cover opacity-30 blur-sm scale-110"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
-                </div>
-            )}
-
-            <Link href="/" className="inline-flex items-center text-gray-400 hover:text-white mt-8 mb-8 transition-colors">
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                Back to Search
-            </Link>
-
-            <div className="mb-12">
-                <div className="w-full flex flex-col md:flex-row gap-8 items-start">
-                    {/* Left Side: Poster (TMDB or HDRezka) */}
-                    <div className="w-full md:w-80 shrink-0">
-                        <div className="aspect-[2/3] rounded-2xl overflow-hidden border border-white/5 shadow-2xl shadow-black/50 group bg-gray-900">
-                            <img
-                                src={tmdbData?.posterPath || details.poster}
-                                alt={tmdbData?.title || details.title}
-                                className="w-full h-full object-cover"
-                            />
-                        </div>
-
-                        {/* TMDB Specific Stats */}
-                        {tmdbData && (
-                            <div className="mt-4 flex flex-col gap-3 p-4 bg-white/5 rounded-2xl border border-white/5 backdrop-blur-md">
-                                {tmdbData.rating && (
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-gray-400 text-xs font-bold uppercase tracking-wider">TMDB Rating</span>
-                                        <span className="text-emerald-400 font-bold flex items-center gap-1">
-                                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
-                                            {tmdbData.rating}
-                                        </span>
-                                    </div>
-                                )}
-                                {tmdbData.genres && tmdbData.genres.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 mt-1">
-                                        {tmdbData.genres.slice(0, 3).map((g: string) => (
-                                            <span key={g} className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-gray-300 border border-white/5">
-                                                {g}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Right Side: Meta Data */}
-                    <div className="flex-1 flex flex-col min-w-0">
-                        <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white mb-2 balance">
-                                    {tmdbData?.title || details.title}
-                                </h1>
-                                <p className="text-xl md:text-2xl text-gray-400 font-medium italic opacity-80">
-                                    {tmdbData?.year || details.year} • {tmdbData?.originalTitle || details.origTitle}
-                                </p>
-                            </div>
-
-                            <div className="flex flex-row gap-2 shrink-0">
-                                <button
-                                    onClick={() => toggleWatchList('plan_to_watch')}
-                                    className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all border flex gap-2 items-center backdrop-blur-md ${watchStatus === 'plan_to_watch' ? 'bg-white/10 border-white/30 text-white shadow-xl' : 'bg-black/20 border-white/10 text-gray-400 hover:text-white hover:border-white/20'}`}
-                                >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                                    </svg>
-                                    Plan to Watch
-                                </button>
-                                <button
-                                    onClick={() => toggleWatchList('watching')}
-                                    className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all border flex gap-2 items-center backdrop-blur-md ${watchStatus === 'watching' ? 'bg-red-600/20 border-red-500 text-white shadow-xl shadow-red-500/10' : 'bg-black/20 border-white/10 text-gray-400 hover:text-white hover:border-red-500/40'}`}
-                                >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    Watching
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (details?.movieId) {
-                                            localStorage.removeItem(`hdrezka_state_${details.movieId}`);
-                                            sessionStorage.setItem('hdrezka_reload_reason', 'User clicked Reset State button');
-                                            window.location.reload();
-                                        }
-                                    }}
-                                    title="Reset playback history and quality preference"
-                                    className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all border flex gap-2 items-center backdrop-blur-md bg-black/20 border-white/10 text-gray-400 hover:text-white hover:border-red-500/40"
-                                >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                    Reset State
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Description */}
-                        <div className="mb-8 p-6 bg-white/5 rounded-3xl border border-white/5 backdrop-blur-md">
-                            <h3 className="text-xs text-gray-500 uppercase font-bold tracking-widest mb-3">Overview</h3>
-                            <p className="text-lg text-gray-200 leading-relaxed max-w-3xl font-medium">
-                                {tmdbData?.overview || details.description}
-                            </p>
-                        </div>
-                    </div> {/* End Right Side */}
-                </div> {/* End Main Row */}
+            <MovieHeader 
+                details={details} 
+                tmdbData={tmdbData} 
+                watchStatus={watchStatus} 
+                toggleWatchList={toggleWatchList} 
+                theaterMode={theaterMode} 
+            />
 
                 {/* Translations */}
                 {details.translations && details.translations.length > 0 && (
@@ -1096,24 +991,8 @@ function MoviePageContent() {
                 {/* Spacer to push content below the fixed theater-mode player */}
                 {theaterMode && <div style={{ height: 'calc(100vh - 4rem)' }} />}
 
-                {/* Movie details */}
-                <div className="bg-gray-900/30 rounded-2xl border border-gray-800 p-6 md:p-8">
-                    <div className="prose prose-invert prose-p:text-gray-300 max-w-none mb-8">
-                        <h2 className="text-xl font-bold text-white mb-4">About this title</h2>
-                        <p className="text-lg leading-relaxed">{details.description}</p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-6 border-t border-gray-800">
-                        {Object.entries(details.info || {}).slice(0, 8).map(([key, value]) => (
-                            <div key={key} className="bg-gray-900/50 p-3 rounded-lg border border-gray-800/50">
-                                <span className="block text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1">{key}</span>
-                                <span className="text-sm text-gray-200">{value as string}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
+                <MovieInfo details={details} tmdbData={tmdbData} />
             </div>
-        </div>
     );
 }
 

@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 
 export const metadata: Metadata = {
-  title: "RezkaStream",
+  title: "RezkaHome",
   description: "A modern wrapper for hdrezka.name",
 };
 
@@ -37,13 +37,13 @@ export default function RootLayout({
 
                 {/* Center: Global Search */}
                 <div className="flex-1 max-w-2xl hidden md:block">
-                   <GlobalHeaderSearch />
+                  <GlobalHeaderSearch />
                 </div>
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                   <Link href="/watchlist" className="flex items-center justify-center w-10 h-10 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 text-gray-400 hover:text-white transition-all">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
                   </Link>
                   <ProfileSelector />
                 </div>
