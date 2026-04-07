@@ -34,13 +34,15 @@ export async function GET(request: Request) {
             const title = $(el).find('.b-content__inline_item-link a').text();
             const poster = $(el).find('.b-content__inline_item-cover img').attr('src');
             const info = $(el).find('.b-content__inline_item-link div').text();
+            const category = $(el).find('span.cat').text().trim();
 
             if (title && resultUrl) {
                 results.push({
                     title,
                     url: resultUrl,
                     poster,
-                    info
+                    info,
+                    category
                 });
             }
         });

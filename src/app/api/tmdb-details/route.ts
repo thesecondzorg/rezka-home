@@ -12,7 +12,9 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    const type = (searchParams.get('type') || 'movie') as 'movie' | 'tv';
+    const typeParam = searchParams.get('type') || 'movie';
+    // Normalize UI types to TMDB types. Default anime/cartoons to 'tv' as a fallback.
+    const type = (typeParam === 'anime' || typeParam === 'cartoons' ? 'tv' : typeParam) as 'movie' | 'tv';
 
     if (!id) {
         return NextResponse.json({ error: 'ID is required' }, { status: 400 });
@@ -31,7 +33,13 @@ export async function GET(request: Request) {
         });
 
         if (!res.ok) {
-            return NextResponse.json({ error: 'TMDB details fetch failed' }, { status: res.status });
+            const errData = await res.json().catch(() => ({}));
+            console.error('TMDB API Error Response:', errData);
+            return NextResponse.json({ 
+                error: 'TMDB details fetch failed', 
+                status: res.status,
+                tmdbError: errData.status_message || 'Unknown TMDB error'
+            }, { status: res.status });
         }
 
         const data = await res.json();

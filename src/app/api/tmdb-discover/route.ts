@@ -26,21 +26,7 @@ export async function GET(request: Request) {
 
     // Determine TMDB base type
     let tmdbType: 'movie' | 'tv' = (type === 'movie' || type === 'cartoons' || (type === 'anime' && !searchParams.get('isTv'))) ? 'movie' : 'tv';
-    
-    // Heuristic: If we are in 'anime' or 'cartoons', we might want to search both, but for now we follow the 'type' param or default to movie
     if (type === 'tv') tmdbType = 'tv';
-
-    // Apply special filters for Cartoons/Anime
-    if (type === 'cartoons') {
-        const genres = includeGenres ? `${includeGenres},16` : '16';
-        params.set('with_genres', genres);
-    } else if (type === 'anime') {
-        const genres = includeGenres ? `${includeGenres},16` : '16';
-        params.set('with_genres', genres);
-        params.set('with_original_language', 'ja');
-    } else {
-        if (includeGenres) params.set('with_genres', includeGenres);
-    }
 
     if (tmdbType === 'tv') {
         sortBy = sortBy.replace('release_date', 'first_air_date');
@@ -50,8 +36,23 @@ export async function GET(request: Request) {
     if (query.trim()) {
         endpoint = `${TMDB_BASE}/search/${tmdbType}`;
         params.set('query', query.trim());
+        if (year && year !== '0') {
+            if (tmdbType === 'movie') params.set('primary_release_year', year);
+            else params.set('first_air_date_year', year);
+        }
     } else {
         endpoint = `${TMDB_BASE}/discover/${tmdbType}`;
+        
+        // Apply Filters only when discovering (as search doesn't support them well)
+        if (type === 'cartoons') {
+            params.set('with_genres', includeGenres ? `${includeGenres},16` : '16');
+        } else if (type === 'anime') {
+            params.set('with_genres', includeGenres ? `${includeGenres},16` : '16');
+            params.set('with_original_language', 'ja');
+        } else if (includeGenres) {
+            params.set('with_genres', includeGenres);
+        }
+
         if (excludeGenres) params.set('without_genres', excludeGenres);
         if (language)      params.set('with_original_language', language);
         if (country)       params.set('with_origin_country', country);
@@ -92,7 +93,7 @@ export async function GET(request: Request) {
                 : null,
             overview:      item.overview || '',
             genreIds:      item.genre_ids || [],
-            type,
+            type: tmdbType,
         }));
 
         return NextResponse.json({

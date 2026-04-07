@@ -28,6 +28,7 @@ function MoviePageContent() {
     const [showNextEpisodeBtn, setShowNextEpisodeBtn] = useState(false);
     const [theaterMode, setTheaterMode] = useState(false);
     const [episodePage, setEpisodePage] = useState(0);
+    const [reloadReason, setReloadReason] = useState<string | null>(null);
 
     // Watchlist State
     const [watchStatus, setWatchStatus] = useState<string | null>(null);
@@ -42,13 +43,13 @@ function MoviePageContent() {
     // Store last stream params so retry can replay them
     const lastStreamParamsRef = useRef<{ movieId: string; translatorId: string; season?: string; episode?: string; action?: string } | null>(null);
 
+    const tmdbId = searchParams.get('tmdbId');
+    const tmdbType = searchParams.get('tmdbType') || 'movie';
+
     useEffect(() => {
         if (url) {
             fetchDetails(url);
 
-            const tmdbId = searchParams.get('tmdbId');
-            const tmdbType = searchParams.get('tmdbType') || 'movie';
-            
             if (tmdbId) {
                 fetch(`/api/tmdb-details?id=${tmdbId}&type=${tmdbType}`)
                     .then(res => res.json())
@@ -70,13 +71,34 @@ function MoviePageContent() {
         return () => {
             if (dbSyncTimeoutRef.current) clearTimeout(dbSyncTimeoutRef.current);
         }
-    }, [url, searchParams]);
+    }, [url, tmdbId, tmdbType]);
 
     // Exit theater mode on Escape key
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTheaterMode(false); };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
+    }, []);
+
+    // Diagnostics / Reload Tracking
+    useEffect(() => {
+        const reason = sessionStorage.getItem('hdrezka_reload_reason');
+        if (reason) {
+            setReloadReason(reason);
+            sessionStorage.removeItem('hdrezka_reload_reason');
+            console.log(`[Diagnostic] React mounted after reload. Reason: ${reason}`);
+            setTimeout(() => setReloadReason(null), 12000);
+        }
+
+        const handleBeforeUnload = () => {
+            // If nothing explicitly set a reason before this unloads, it's a native browser refresh / crash / HMR
+            if (!sessionStorage.getItem('hdrezka_reload_reason')) {
+                sessionStorage.setItem('hdrezka_reload_reason', 'Native Browser Event (User F5, Background Tab Killed, or Next.js HMR)');
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, []);
 
     // Auto-jump episode page when selected episode changes (e.g. restore from saved state)
@@ -179,8 +201,9 @@ function MoviePageContent() {
             }
 
             const hls = new Hls({
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60,
+                maxBufferLength: 15,
+                maxMaxBufferLength: 30,
+                maxBufferSize: 30 * 1000 * 1000, // 30MB max memory limit to prevent OOM
                 startLevel: -1 // Auto by default
             });
             hlsRef.current = hls;
@@ -190,7 +213,24 @@ function MoviePageContent() {
 
             hls.on(Hls.Events.ERROR, function (event, data) {
                 if (data.fatal) {
-                    console.error("HLS Error:", data.type);
+                    console.error("HLS Fatal Error:", data.type, data.details);
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            console.log("Fatal network error encountered, trying to recover...");
+                            sessionStorage.setItem('hdrezka_reload_reason', `Network Error: ${data.details || 'HLS timeout/stall'}`);
+                            hls.startLoad();
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            console.log("Fatal media error encountered, trying to recover...");
+                            sessionStorage.setItem('hdrezka_reload_reason', `Media Decode Error: ${data.details || 'Hardware/Decoder Drop'}`);
+                            hls.recoverMediaError();
+                            break;
+                        default:
+                            console.log("Unrecoverable error, destroying player.");
+                            sessionStorage.setItem('hdrezka_reload_reason', `Unrecoverable HLS Error: ${data.details || data.type}`);
+                            hls.destroy();
+                            break;
+                    }
                 }
             });
 
@@ -554,28 +594,28 @@ function MoviePageContent() {
         });
 
         // Sync to SQLite Profile Server-side (throttled to once every 5 seconds)
-        if (!dbSyncTimeoutRef.current && details) {
-            dbSyncTimeoutRef.current = setTimeout(() => {
-                fetch('/api/watchlist', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        url,
-                        title: details.title,
-                        poster: details.poster,
-                        type: 'watching', // automatically upgrade
-                        status: {
-                            seasonId: selectedSeason || undefined,
-                            episodeId: selectedEpisode || undefined,
-                            currentTime,
-                            duration
-                        }
-                    })
-                });
-                if (watchStatus !== 'watching') setWatchStatus('watching');
-                dbSyncTimeoutRef.current = null;
-            }, 5000);
-        }
+        // if (!dbSyncTimeoutRef.current && details) {
+        //     dbSyncTimeoutRef.current = setTimeout(() => {
+        //         fetch('/api/watchlist', {
+        //             method: 'POST',
+        //             headers: { 'Content-Type': 'application/json' },
+        //             body: JSON.stringify({
+        //                 url,
+        //                 title: details.title,
+        //                 poster: details.poster,
+        //                 type: 'watching', // automatically upgrade
+        //                 status: {
+        //                     seasonId: selectedSeason || undefined,
+        //                     episodeId: selectedEpisode || undefined,
+        //                     currentTime,
+        //                     duration
+        //                 }
+        //             })
+        //         });
+        //         if (watchStatus !== 'watching') setWatchStatus('watching');
+        //         dbSyncTimeoutRef.current = null;
+        //     }, 5000);
+        // }
 
         if (!details?.isSeries) return;
 
@@ -695,12 +735,20 @@ function MoviePageContent() {
 
     return (
         <div className={`animate-in fade-in duration-500 ${theaterMode ? 'max-w-none' : 'max-w-6xl mx-auto px-4 md:px-0'}`}>
+            {reloadReason && (
+                 <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] bg-orange-600 border border-orange-400 text-white px-6 py-3 rounded-2xl shadow-xl backdrop-blur-md font-bold max-w-lg text-center flex items-center justify-between gap-4">
+                     <span className="text-sm">Reload Reason: <strong>{reloadReason}</strong></span>
+                     <button onClick={() => setReloadReason(null)} className="shrink-0 bg-black/20 hover:bg-black/40 p-1.5 rounded-xl transition-colors">
+                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                     </button>
+                 </div>
+            )}
             {/* Backdrop Section (only if TMDB data available) */}
             {tmdbData?.backdropPath && !theaterMode && (
                 <div className="absolute inset-x-0 top-0 h-[70vh] -z-10 overflow-hidden">
-                    <img 
-                        src={tmdbData.backdropPath} 
-                        alt="backdrop" 
+                    <img
+                        src={tmdbData.backdropPath}
+                        alt="backdrop"
                         className="w-full h-full object-cover opacity-30 blur-sm scale-110"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent" />
@@ -717,13 +765,13 @@ function MoviePageContent() {
                     {/* Left Side: Poster (TMDB or HDRezka) */}
                     <div className="w-full md:w-80 shrink-0">
                         <div className="aspect-[2/3] rounded-2xl overflow-hidden border border-white/5 shadow-2xl shadow-black/50 group bg-gray-900">
-                            <img 
-                                src={tmdbData?.posterPath || details.poster} 
+                            <img
+                                src={tmdbData?.posterPath || details.poster}
                                 alt={tmdbData?.title || details.title}
                                 className="w-full h-full object-cover"
                             />
                         </div>
-                        
+
                         {/* TMDB Specific Stats */}
                         {tmdbData && (
                             <div className="mt-4 flex flex-col gap-3 p-4 bg-white/5 rounded-2xl border border-white/5 backdrop-blur-md">
@@ -781,6 +829,22 @@ function MoviePageContent() {
                                     </svg>
                                     Watching
                                 </button>
+                                <button
+                                    onClick={() => {
+                                        if (details?.movieId) {
+                                            localStorage.removeItem(`hdrezka_state_${details.movieId}`);
+                                            sessionStorage.setItem('hdrezka_reload_reason', 'User clicked Reset State button');
+                                            window.location.reload();
+                                        }
+                                    }}
+                                    title="Reset playback history and quality preference"
+                                    className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all border flex gap-2 items-center backdrop-blur-md bg-black/20 border-white/10 text-gray-400 hover:text-white hover:border-red-500/40"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    Reset State
+                                </button>
                             </div>
                         </div>
 
@@ -795,259 +859,259 @@ function MoviePageContent() {
                 </div> {/* End Main Row */}
 
                 {/* Translations */}
-                    {details.translations && details.translations.length > 0 && (
-                        <div className="mb-4">
-                            <div className="flex flex-wrap gap-2">
-                                {details.translations.map((t: any, i: number) => (
-                                    <button
-                                        key={i}
-                                        onClick={() => handleTranslatorChange(t)}
-                                        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border flex items-center justify-center gap-2 ${selectedTranslatorId === t.id
-                                            ? 'bg-red-600 text-white border-red-500'
-                                            : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
-                                            }`}
-                                    >
-                                        {t.name}
-                                        {t.flag && <img src={t.flag} alt={t.name} className="w-5 h-5 object-contain inline-block rounded-sm" />}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* TV Series Selection */}
-                    {details.isSeries && details.seasons && details.seasons.length > 0 && (
-                        <div className="mb-6 space-y-4">
-                            {/* Seasons */}
-                            <div className="flex flex-wrap gap-2">
-                                {details.seasons.map((s: any) => (
-                                    <button
-                                        key={s.id}
-                                        onClick={() => handleSeasonChange(s.id)}
-                                        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${selectedSeason === s.id
-                                            ? 'bg-blue-600 text-white border-blue-500'
-                                            : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
-                                            }`}
-                                    >
-                                        {s.name}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Episodes — paginated strip */}
-                            {selectedSeason && details.episodes?.[selectedSeason] && (() => {
-                                const PAGE_SIZE = 10;
-                                const allEps: any[] = details.episodes[selectedSeason];
-                                const totalPages = Math.ceil(allEps.length / PAGE_SIZE);
-                                const page = Math.min(episodePage, totalPages - 1);
-                                const pageEps = allEps.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
-                                return (
-                                    <div className="flex items-center gap-2">
-                                        {/* Prev page button */}
-                                        <button
-                                            onClick={() => setEpisodePage(p => Math.max(0, p - 1))}
-                                            disabled={page === 0}
-                                            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:border-gray-500 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                            </svg>
-                                        </button>
-
-                                        {/* Episode buttons for this page */}
-                                        <div className="flex gap-1.5 overflow-hidden">
-                                            {pageEps.map((e: any) => (
-                                                <button
-                                                    key={e.id}
-                                                    onClick={() => { handleEpisodeChange(e.id); }}
-                                                    className={`shrink-0 w-20 h-10 text-xs font-medium rounded-lg transition-colors border flex items-center justify-center ${selectedEpisode === e.id
-                                                        ? 'bg-red-600 text-white border-red-500'
-                                                        : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-700'
-                                                        }`}
-                                                >
-                                                    {e.name}
-                                                </button>
-                                            ))}
-                                        </div>
-
-                                        {/* Next page button */}
-                                        <button
-                                            onClick={() => setEpisodePage(p => Math.min(totalPages - 1, p + 1))}
-                                            disabled={page >= totalPages - 1}
-                                            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:border-gray-500 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </button>
-
-                                        {/* Page indicator */}
-                                        {totalPages > 1 && (
-                                            <span className="text-xs text-gray-500 shrink-0 pl-1">
-                                                {page + 1} / {totalPages}
-                                            </span>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-                        </div>
-                    )}
-
-                    {/* Player Container */}
-                    <div className={`mb-8 bg-black relative flex items-center justify-center group transition-all duration-300
-                        ${theaterMode
-                            ? 'fixed top-16 left-0 right-0 bottom-0 z-40 rounded-none border-0 shadow-none'
-                            : 'w-full rounded-2xl overflow-hidden shadow-2xl border border-gray-800 aspect-video'
-                        }`}>
-                        {/* Video element is ALWAYS mounted to preserve fullscreen */}
-                        <video
-                            ref={videoRef}
-                            controls
-                            autoPlay
-                            onEnded={handleVideoEnded}
-                            onTimeUpdate={handleTimeUpdate}
-                            className="w-full h-full outline-none"
-                            src={!streamHlsUrl ? streamUrl : undefined}
-                            controlsList="nodownload"
-                            poster={details.poster}
-                            data-movie-id={details.movieId}
-                        >
-                            Your browser does not support the video tag.
-                        </video>
-
-                        {/* Loading Overlay (shown on top of video) */}
-                        {streamLoading && (
-                            <div className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center">
-                                <div className="w-12 h-12 border-4 border-gray-800 border-t-red-500 rounded-full animate-spin mb-4"></div>
-                                <p className="text-gray-400 animate-pulse">Loading Stream...</p>
-                            </div>
-                        )}
-
-                        {/* Poster Fallback Overlay (when no stream loaded and no error) */}
-                        {!streamUrl && !streamHlsUrl && !streamLoading && !streamError && (
-                            <div className="absolute inset-0 z-20 flex items-center justify-center">
-                                {details.poster && (
-                                    <img src={details.poster} alt="Poster fallback" className="absolute inset-0 w-full h-full object-cover opacity-30" />
-                                )}
-                                <div className="text-gray-300 flex flex-col items-center relative z-10 bg-black/50 p-6 rounded-xl backdrop-blur-sm">
-                                    <svg className="w-16 h-16 mb-4 opacity-50" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
-                                    <p>Select a translation to start watching</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Stream Error Retry Overlay */}
-                        {streamError && !streamLoading && (
-                            <div className="absolute inset-0 z-30 bg-black/85 flex flex-col items-center justify-center gap-5 animate-in fade-in duration-300">
-                                {details.poster && (
-                                    <img src={details.poster} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" />
-                                )}
-                                <div className="relative z-10 flex flex-col items-center gap-5 px-8 text-center">
-                                    <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
-                                        <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <p className="text-white font-semibold text-base mb-1">Stream unavailable</p>
-                                        <p className="text-gray-400 text-sm max-w-xs">{streamError}</p>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            const p = lastStreamParamsRef.current;
-                                            if (p) fetchStream(p.movieId, p.translatorId, p.season, p.episode, p.action);
-                                        }}
-                                        className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-gray-100 active:scale-95 text-black text-sm font-bold rounded-xl transition-all shadow-lg"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                        </svg>
-                                        Retry
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Next Episode Overlay Button */}
-                        {showNextEpisodeBtn && details?.isSeries && (
-                            <button
-                                onClick={handleVideoEnded}
-                                className="absolute bottom-20 right-8 z-30 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold shadow-[0_0_20px_rgba(220,38,38,0.5)] transition-all flex items-center gap-2 group animate-in slide-in-from-right-8 fade-in duration-300"
-                            >
-                                Next Episode
-                                <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
-                            </button>
-                        )}
-
-                        {/* Quality Selector Overlay */}
-                        {streams.length > 1 && (
-                            <div className="absolute top-4 right-4 z-20 flex flex-col items-end">
+                {details.translations && details.translations.length > 0 && (
+                    <div className="mb-4">
+                        <div className="flex flex-wrap gap-2">
+                            {details.translations.map((t: any, i: number) => (
                                 <button
-                                    onClick={() => setShowQualities(!showQualities)}
-                                    className="bg-black/70 hover:bg-black/90 text-white backdrop-blur-md px-3 py-1.5 rounded-lg text-sm font-semibold border border-white/10 transition-all shadow-lg flex items-center gap-2"
+                                    key={i}
+                                    onClick={() => handleTranslatorChange(t)}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border flex items-center justify-center gap-2 ${selectedTranslatorId === t.id
+                                        ? 'bg-red-600 text-white border-red-500'
+                                        : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
+                                        }`}
                                 >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                    {currentQuality}
+                                    {t.name}
+                                    {t.flag && <img src={t.flag} alt={t.name} className="w-5 h-5 object-contain inline-block rounded-sm" />}
                                 </button>
-
-                                {showQualities && (
-                                    <div className="mt-2 bg-black/90 backdrop-blur-xl border border-gray-700/50 rounded-lg overflow-hidden flex flex-col w-32 shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200">
-                                        {streams.map((s, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => handleQualityChange(s)}
-                                                className={`px-4 py-2 text-sm text-left transition-colors ${currentQuality === s.quality
-                                                    ? 'bg-red-600/20 text-red-400 font-bold border-l-2 border-red-500'
-                                                    : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent hover:border-gray-500'
-                                                    }`}
-                                            >
-                                                {s.quality}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Theater Mode Toggle */}
-                        <button
-                            onClick={() => setTheaterMode(t => !t)}
-                            title={theaterMode ? 'Exit theater mode (Esc)' : 'Theater mode'}
-                            className="absolute top-4 left-4 z-20 bg-black/70 hover:bg-black/90 text-white backdrop-blur-md p-1.5 rounded-lg border border-white/10 transition-all shadow-lg opacity-0 group-hover:opacity-100"
-                        >
-                            {theaterMode ? (
-                                // Compress icon
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-                                </svg>
-                            ) : (
-                                // Expand icon
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-                                </svg>
-                            )}
-                        </button>
-                    </div>
-
-                    {/* Spacer to push content below the fixed theater-mode player */}
-                    {theaterMode && <div style={{ height: 'calc(100vh - 4rem)' }} />}
-
-                    {/* Movie details */}
-                    <div className="bg-gray-900/30 rounded-2xl border border-gray-800 p-6 md:p-8">
-                        <div className="prose prose-invert prose-p:text-gray-300 max-w-none mb-8">
-                            <h2 className="text-xl font-bold text-white mb-4">About this title</h2>
-                            <p className="text-lg leading-relaxed">{details.description}</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-6 border-t border-gray-800">
-                            {Object.entries(details.info || {}).slice(0, 8).map(([key, value]) => (
-                                <div key={key} className="bg-gray-900/50 p-3 rounded-lg border border-gray-800/50">
-                                    <span className="block text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1">{key}</span>
-                                    <span className="text-sm text-gray-200">{value as string}</span>
-                                </div>
                             ))}
                         </div>
                     </div>
+                )}
+
+                {/* TV Series Selection */}
+                {details.isSeries && details.seasons && details.seasons.length > 0 && (
+                    <div className="mb-6 space-y-4">
+                        {/* Seasons */}
+                        <div className="flex flex-wrap gap-2">
+                            {details.seasons.map((s: any) => (
+                                <button
+                                    key={s.id}
+                                    onClick={() => handleSeasonChange(s.id)}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${selectedSeason === s.id
+                                        ? 'bg-blue-600 text-white border-blue-500'
+                                        : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
+                                        }`}
+                                >
+                                    {s.name}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Episodes — paginated strip */}
+                        {selectedSeason && details.episodes?.[selectedSeason] && (() => {
+                            const PAGE_SIZE = 10;
+                            const allEps: any[] = details.episodes[selectedSeason];
+                            const totalPages = Math.ceil(allEps.length / PAGE_SIZE);
+                            const page = Math.min(episodePage, totalPages - 1);
+                            const pageEps = allEps.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+                            return (
+                                <div className="flex items-center gap-2">
+                                    {/* Prev page button */}
+                                    <button
+                                        onClick={() => setEpisodePage(p => Math.max(0, p - 1))}
+                                        disabled={page === 0}
+                                        className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:border-gray-500 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                        </svg>
+                                    </button>
+
+                                    {/* Episode buttons for this page */}
+                                    <div className="flex gap-1.5 overflow-hidden">
+                                        {pageEps.map((e: any) => (
+                                            <button
+                                                key={e.id}
+                                                onClick={() => { handleEpisodeChange(e.id); }}
+                                                className={`shrink-0 w-20 h-10 text-xs font-medium rounded-lg transition-colors border flex items-center justify-center ${selectedEpisode === e.id
+                                                    ? 'bg-red-600 text-white border-red-500'
+                                                    : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-700'
+                                                    }`}
+                                            >
+                                                {e.name}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Next page button */}
+                                    <button
+                                        onClick={() => setEpisodePage(p => Math.min(totalPages - 1, p + 1))}
+                                        disabled={page >= totalPages - 1}
+                                        className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:border-gray-500 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+
+                                    {/* Page indicator */}
+                                    {totalPages > 1 && (
+                                        <span className="text-xs text-gray-500 shrink-0 pl-1">
+                                            {page + 1} / {totalPages}
+                                        </span>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </div>
+                )}
+
+                {/* Player Container */}
+                <div className={`mb-8 bg-black relative flex items-center justify-center group transition-all duration-300
+                        ${theaterMode
+                        ? 'fixed top-16 left-0 right-0 bottom-0 z-40 rounded-none border-0 shadow-none'
+                        : 'w-full rounded-2xl overflow-hidden shadow-2xl border border-gray-800 aspect-video'
+                    }`}>
+                    {/* Video element is ALWAYS mounted to preserve fullscreen */}
+                    <video
+                        ref={videoRef}
+                        controls
+                        autoPlay
+                        onEnded={handleVideoEnded}
+                        onTimeUpdate={handleTimeUpdate}
+                        className="w-full h-full outline-none"
+                        src={!streamHlsUrl ? streamUrl : undefined}
+                        controlsList="nodownload"
+                        poster={details.poster}
+                        data-movie-id={details.movieId}
+                    >
+                        Your browser does not support the video tag.
+                    </video>
+
+                    {/* Loading Overlay (shown on top of video) */}
+                    {streamLoading && (
+                        <div className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center">
+                            <div className="w-12 h-12 border-4 border-gray-800 border-t-red-500 rounded-full animate-spin mb-4"></div>
+                            <p className="text-gray-400 animate-pulse">Loading Stream...</p>
+                        </div>
+                    )}
+
+                    {/* Poster Fallback Overlay (when no stream loaded and no error) */}
+                    {!streamUrl && !streamHlsUrl && !streamLoading && !streamError && (
+                        <div className="absolute inset-0 z-20 flex items-center justify-center">
+                            {details.poster && (
+                                <img src={details.poster} alt="Poster fallback" className="absolute inset-0 w-full h-full object-cover opacity-30" />
+                            )}
+                            <div className="text-gray-300 flex flex-col items-center relative z-10 bg-black/50 p-6 rounded-xl backdrop-blur-sm">
+                                <svg className="w-16 h-16 mb-4 opacity-50" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                                <p>Select a translation to start watching</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Stream Error Retry Overlay */}
+                    {streamError && !streamLoading && (
+                        <div className="absolute inset-0 z-30 bg-black/85 flex flex-col items-center justify-center gap-5 animate-in fade-in duration-300">
+                            {details.poster && (
+                                <img src={details.poster} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" />
+                            )}
+                            <div className="relative z-10 flex flex-col items-center gap-5 px-8 text-center">
+                                <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
+                                    <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p className="text-white font-semibold text-base mb-1">Stream unavailable</p>
+                                    <p className="text-gray-400 text-sm max-w-xs">{streamError}</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        const p = lastStreamParamsRef.current;
+                                        if (p) fetchStream(p.movieId, p.translatorId, p.season, p.episode, p.action);
+                                    }}
+                                    className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-gray-100 active:scale-95 text-black text-sm font-bold rounded-xl transition-all shadow-lg"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    Retry
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Next Episode Overlay Button */}
+                    {showNextEpisodeBtn && details?.isSeries && (
+                        <button
+                            onClick={handleVideoEnded}
+                            className="absolute bottom-20 right-8 z-30 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold shadow-[0_0_20px_rgba(220,38,38,0.5)] transition-all flex items-center gap-2 group animate-in slide-in-from-right-8 fade-in duration-300"
+                        >
+                            Next Episode
+                            <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                        </button>
+                    )}
+
+                    {/* Quality Selector Overlay */}
+                    {streams.length > 1 && (
+                        <div className="absolute top-4 right-4 z-20 flex flex-col items-end">
+                            <button
+                                onClick={() => setShowQualities(!showQualities)}
+                                className="bg-black/70 hover:bg-black/90 text-white backdrop-blur-md px-3 py-1.5 rounded-lg text-sm font-semibold border border-white/10 transition-all shadow-lg flex items-center gap-2"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                {currentQuality}
+                            </button>
+
+                            {showQualities && (
+                                <div className="mt-2 bg-black/90 backdrop-blur-xl border border-gray-700/50 rounded-lg overflow-hidden flex flex-col w-32 shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200">
+                                    {streams.map((s, i) => (
+                                        <button
+                                            key={i}
+                                            onClick={() => handleQualityChange(s)}
+                                            className={`px-4 py-2 text-sm text-left transition-colors ${currentQuality === s.quality
+                                                ? 'bg-red-600/20 text-red-400 font-bold border-l-2 border-red-500'
+                                                : 'text-gray-300 hover:bg-gray-800 border-l-2 border-transparent hover:border-gray-500'
+                                                }`}
+                                        >
+                                            {s.quality}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Theater Mode Toggle */}
+                    <button
+                        onClick={() => setTheaterMode(t => !t)}
+                        title={theaterMode ? 'Exit theater mode (Esc)' : 'Theater mode'}
+                        className="absolute top-4 left-4 z-20 bg-black/70 hover:bg-black/90 text-white backdrop-blur-md p-1.5 rounded-lg border border-white/10 transition-all shadow-lg opacity-0 group-hover:opacity-100"
+                    >
+                        {theaterMode ? (
+                            // Compress icon
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                            </svg>
+                        ) : (
+                            // Expand icon
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                            </svg>
+                        )}
+                    </button>
+                </div>
+
+                {/* Spacer to push content below the fixed theater-mode player */}
+                {theaterMode && <div style={{ height: 'calc(100vh - 4rem)' }} />}
+
+                {/* Movie details */}
+                <div className="bg-gray-900/30 rounded-2xl border border-gray-800 p-6 md:p-8">
+                    <div className="prose prose-invert prose-p:text-gray-300 max-w-none mb-8">
+                        <h2 className="text-xl font-bold text-white mb-4">About this title</h2>
+                        <p className="text-lg leading-relaxed">{details.description}</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pt-6 border-t border-gray-800">
+                        {Object.entries(details.info || {}).slice(0, 8).map(([key, value]) => (
+                            <div key={key} className="bg-gray-900/50 p-3 rounded-lg border border-gray-800/50">
+                                <span className="block text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1">{key}</span>
+                                <span className="text-sm text-gray-200">{value as string}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
         </div>
     );

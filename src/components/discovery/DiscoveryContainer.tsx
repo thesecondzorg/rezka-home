@@ -4,7 +4,27 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDiscovery } from '@/context/DiscoveryContext';
 import { ResultsGrid } from './ResultsGrid';
+import { LinkingChoiceModal } from './LinkingChoiceModal';
 import type { UnifiedResult } from './types';
+
+interface HdRezkaResult {
+    title: string;
+    url: string;
+    poster?: string;
+    info?: string;
+    category?: string;
+}
+
+interface LinkingCandidates {
+    tmdbData: {
+        title: string;
+        poster?: string;
+        year?: string;
+        type: string;
+        tmdbId: string | number;
+    };
+    results: HdRezkaResult[];
+}
 
 interface DiscoveryContainerProps {
     hideSourceToggle?: boolean;
@@ -35,6 +55,7 @@ export function DiscoveryContainer({
     const [hasMore, setHasMore] = useState(true);
     const [noApiKey, setNoApiKey] = useState(false);
     const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
+    const [linkingCandidates, setLinkingCandidates] = useState<LinkingCandidates | null>(null);
 
     // — Linking —
     const [linkingId, setLinkingId] = useState<string | number | null>(null);
@@ -135,10 +156,16 @@ export function DiscoveryContainer({
             'anime': 'Аниме'
         };
         const searchKeyword = singularMap[contentType];
-        if (searchKeyword && !activeHdRezkaGenre) {
-            finalResults = finalResults.filter((r: any) => 
-                r.info && r.info.toLowerCase().includes(searchKeyword.toLowerCase())
-            );
+        
+        const isSearching = !!debouncedQuery.trim();
+
+        // Skip post-fetch category filtering if searching by title, as requested.
+        // Otherwise, filter results by the mapped category keyword (e.g. "Сериал").
+        if (searchKeyword && !activeHdRezkaGenre && !isSearching) {
+            finalResults = finalResults.filter((r: any) => {
+                const cat = (r.category || r.info || '').toLowerCase();
+                return cat.includes(searchKeyword.toLowerCase());
+            });
         }
 
         const unified: UnifiedResult[] = finalResults.map((r: any) => ({
@@ -193,36 +220,112 @@ export function DiscoveryContainer({
         try {
             const detailRes = await fetch(`/api/tmdb-details?id=${result.id}&type=${result.type}`);
             const detail = await detailRes.json();
-            if (detail.error) throw new Error(detail.error);
+            
+            if (detail.error) {
+                console.warn('TMDB linking failed for this item:', detail.error);
+                setLinkingCandidates({ 
+                    tmdbData: { title: result.title, type: result.type, tmdbId: result.id, poster: result.poster || undefined }, 
+                    results: [] 
+                });
+                return;
+            }
 
-            const { imdbId, title, originalTitle, year: mYear } = detail;
+            const { imdbId, title, originalTitle, year: mYear, posterPath } = detail;
+            const tmdbData = { title, poster: posterPath, year: mYear, type: result.type, tmdbId: result.id, imdbId };
 
+            let hdResults: HdRezkaResult[] = [];
+
+            // 1. Try IMDB ID match first (most accurate)
             if (imdbId) {
-                const searchRes = await fetch(`/api/search?q=${encodeURIComponent(imdbId)}`);
-                const searchData = await searchRes.json();
-                const match = (searchData.results || [])[0];
-                if (match?.url) {
-                    router.push(`/movie?url=${encodeURIComponent(match.url)}&tmdbId=${result.id}&tmdbType=${result.type}`);
-                    return;
-                }
+                const res = await fetch(`/api/search?q=${encodeURIComponent(imdbId)}`);
+                const data = await res.json();
+                hdResults = data.results || [];
             }
 
-            if (originalTitle) {
+            // 2. Try Title + Year (Standard English Title)
+            if (hdResults.length === 0 && title) {
+                const query = `${title} ${mYear || ''}`.trim();
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                hdResults = data.results || [];
+            }
+
+            // 3. Try Original Title + Year (Fallback for non-English results)
+            if (hdResults.length === 0 && originalTitle && originalTitle !== title) {
                 const query = `${originalTitle} ${mYear || ''}`.trim();
-                const searchRes = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-                const searchData = await searchRes.json();
-                const match = (searchData.results || [])[0];
-                if (match?.url) {
-                    router.push(`/movie?url=${encodeURIComponent(match.url)}&tmdbId=${result.id}&tmdbType=${result.type}`);
-                    return;
-                }
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                hdResults = data.results || [];
             }
-        } catch (err) {
-            console.error('Auto-linking error:', err);
-        }
 
-        router.push(`/?q=${encodeURIComponent(result.title)}`);
-        setLinkingId(null);
+            // 4. Try Main Title part only (if title contains colons)
+            if (hdResults.length === 0 && title?.includes(':')) {
+                const mainTitle = title.split(':')[0].trim();
+                const res = await fetch(`/api/search?q=${encodeURIComponent(mainTitle)}`);
+                const data = await res.json();
+                hdResults = data.results || [];
+            }
+
+            // --- Scoring and Selection Logic ---
+            const scoredResults = hdResults.map(res => {
+                let score = 0;
+                const lowTitle = res.title.toLowerCase();
+                const lowTarget = (title || '').toLowerCase();
+                const lowOrigTarget = (originalTitle || '').toLowerCase();
+                const resInfo = (res.info || '').toLowerCase();
+
+                // 1. Title Match (Exact or Substring)
+                if (lowTitle === lowTarget || lowTitle === lowOrigTarget) score += 15;
+                else if (lowTitle.includes(lowTarget) || lowTarget.includes(lowTitle)) score += 8;
+
+                // 2. Year Match (Check if year exists in HDRezka info string)
+                if (mYear && resInfo.includes(mYear)) score += 10;
+
+                // 3. Category Match (Mapping TMDB types to Russian categories)
+                const isTv = result.type === 'tv' || result.type === 'anime'; // Anime logic often series
+                const resIsSeries = resInfo.includes('сериал') || resInfo.includes('аниме') || resInfo.includes('мультсериал');
+                
+                if (isTv && resIsSeries) score += 5;
+                else if (!isTv && !resIsSeries) score += 5;
+
+                return { ...res, score };
+            }).sort((a, b) => b.score - a.score);
+
+            // Auto-select if we have a clear winner with high confidence
+            const topResult = scoredResults[0];
+            const secondResult = scoredResults[1];
+
+            // Threshold: Score > 20 (Target Match + Year/Category) AND significantly better than second choice
+            const isConfidenceHigh = topResult && topResult.score >= 20 && (!secondResult || topResult.score > secondResult.score + 5);
+
+            if (isConfidenceHigh) {
+                // Auto-navigate
+                router.push(`/movie?url=${encodeURIComponent(topResult.url)}&tmdbId=${result.id}&tmdbType=${result.type}`);
+            } else if (hdResults.length > 0) {
+                // Multiple or Ambiguous matches: Show Modal
+                setLinkingCandidates({ tmdbData, results: hdResults });
+            } else {
+                // Zero matches
+                setLinkingCandidates({ tmdbData, results: [] });
+            }
+
+        } catch (err) {
+            console.error('Linking error:', err);
+            // On hard error, we show the selection modal with 0 results to notify user
+            setLinkingCandidates({ 
+                tmdbData: { title: result.title, type: result.type, tmdbId: result.id, poster: result.poster || undefined }, 
+                results: [] 
+            });
+        } finally {
+            setLinkingId(null);
+        }
+    };
+
+    const handleCandidateSelect = (entry: HdRezkaResult) => {
+        if (!linkingCandidates) return;
+        const { tmdbData } = linkingCandidates;
+        router.push(`/movie?url=${encodeURIComponent(entry.url)}&tmdbId=${tmdbData.tmdbId}&tmdbType=${tmdbData.type}`);
+        setLinkingCandidates(null);
     };
 
     if (noApiKey) {
@@ -269,6 +372,16 @@ export function DiscoveryContainer({
                     </div>
                 )}
             </div>
+
+            {/* Selection Modal Overlay */}
+            {linkingCandidates && (
+                <LinkingChoiceModal 
+                    tmdbData={linkingCandidates.tmdbData}
+                    results={linkingCandidates.results}
+                    onSelect={handleCandidateSelect}
+                    onClose={() => setLinkingCandidates(null)}
+                />
+            )}
         </div>
     );
 }

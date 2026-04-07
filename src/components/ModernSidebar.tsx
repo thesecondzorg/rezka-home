@@ -17,10 +17,18 @@ export function ModernSidebar() {
         activeCountry, setActiveCountry, toggleCountry,
         sortState, setSortState, toggleSort,
         year, setYear,
+        searchQuery, setSearchQuery,
         discoverySource, setDiscoverySource,
         activeHdRezkaGenre, setActiveHdRezkaGenre,
         isInitialized
     } = useDiscovery();
+
+    const [localSearch, setLocalSearch] = useState(searchQuery);
+
+    const handleSearchChange = (val: string) => {
+        setLocalSearch(val);
+        setSearchQuery(val);
+    };
 
     const genres = contentType === 'movie' ? MOVIE_GENRES : TV_GENRES;
 
@@ -33,6 +41,35 @@ export function ModernSidebar() {
     return (
         <aside className="w-80 h-full flex flex-col bg-gray-950/20 border-r border-gray-800/50 pb-20">
             <div className="flex flex-col gap-8 p-8">
+                {/* Global Search — Premium Input */}
+                <section>
+                    <h3 className="sidebar-label mb-4">Quick Search</h3>
+                    <div className="relative group">
+                        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                            <svg className={`w-4 h-4 transition-colors duration-300 ${localSearch ? 'text-blue-500' : 'text-gray-500 group-focus-within:text-red-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </div>
+                        <input
+                            type="text"
+                            placeholder="Find titles on HDRezka..."
+                            value={localSearch}
+                            onChange={(e) => handleSearchChange(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-800 text-sm font-bold rounded-2xl pl-12 pr-10 py-3.5 text-white placeholder-gray-600 outline-none focus:border-red-500/50 focus:ring-4 focus:ring-red-500/5 transition-all shadow-inner"
+                        />
+                        {localSearch && (
+                            <button 
+                                onClick={() => handleSearchChange('')}
+                                className="absolute inset-y-0 right-3 flex items-center text-gray-500 hover:text-white transition-colors"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
+                </section>
+
                 {/* Mode Selector */}
                 <section>
                     <h3 className="sidebar-label mb-4">Discovery Source</h3>
