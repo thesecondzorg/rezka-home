@@ -82,6 +82,34 @@ function MoviePageContent() {
         return () => window.removeEventListener('keydown', onKey);
     }, []);
 
+    // Xbox Controller Binding - Button X (index 2) triggers Next Episode
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const isXbox = /Xbox/i.test(navigator.userAgent);
+        const hasGamepadAPI = !!navigator.getGamepads;
+        if (!isXbox && !hasGamepadAPI) return;
+
+        let rafId: number;
+        let lastPressed = false;
+
+        const pollGamepad = () => {
+            const gamepads = navigator.getGamepads();
+            const gp = gamepads[0]; // Primary controller
+            if (gp && gp.buttons && gp.buttons[2]) {
+                const isPressed = gp.buttons[2].pressed;
+                if (isPressed && !lastPressed) {
+                    console.log('[Xbox] Button X pressed - Next Episode');
+                    handleVideoEnded();
+                }
+                lastPressed = isPressed;
+            }
+            rafId = requestAnimationFrame(pollGamepad);
+        };
+
+        rafId = requestAnimationFrame(pollGamepad);
+        return () => cancelAnimationFrame(rafId);
+    }, [details, selectedSeason, selectedEpisode]); // Re-run to keep handleVideoEnded closure fresh
+
     // Diagnostics / Reload Tracking
     useEffect(() => {
         const reason = sessionStorage.getItem('hdrezka_reload_reason');
