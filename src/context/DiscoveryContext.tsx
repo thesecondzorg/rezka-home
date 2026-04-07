@@ -31,6 +31,7 @@ interface DiscoveryContextType {
     discoverySource: 'tmdb' | 'hdrezka';
     setDiscoverySource: (source: 'tmdb' | 'hdrezka') => void;
     isInitialized: boolean;
+    tmdbAvailable: boolean;
 }
 
 const DiscoveryContext = createContext<DiscoveryContextType | undefined>(undefined);
@@ -50,6 +51,8 @@ export function DiscoveryProvider({ children }: { children: ReactNode }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeHdRezkaGenre, setActiveHdRezkaGenre] = useState<string | null>(null);
     const [discoverySource, setDiscoverySource] = useState<'tmdb' | 'hdrezka'>('tmdb');
+    const [tmdbAvailable, setTmdbAvailable] = useState(false);
+    const [configLoaded, setConfigLoaded] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);
 
     // — Exclusivity Wrappers —
@@ -67,15 +70,43 @@ export function DiscoveryProvider({ children }: { children: ReactNode }) {
         }
     }, [searchQuery]);
 
-    // — Sync URL -> State (Initial Load) —
+    // — Phase 1: Initial Configuration —
     useEffect(() => {
-        if (isInitialized) return;
+        const checkConfig = async () => {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                setTmdbAvailable(data.tmdbEnabled);
+                
+                // If TMDB is not available, we MUST use hdrezka
+                if (!data.tmdbEnabled) {
+                    setDiscoverySource('hdrezka');
+                }
+            } catch (e) {
+                console.error('Failed to fetch config:', e);
+            } finally {
+                setConfigLoaded(true);
+            }
+        };
+        checkConfig();
+    }, []);
+
+    // — Phase 2: Sync URL -> State (Initial Load) —
+    useEffect(() => {
+        if (!configLoaded || isInitialized) return;
 
         const type = searchParams.get('type') as ContentType;
         if (type) setContentType(type);
 
         const source = searchParams.get('source') as 'tmdb' | 'hdrezka';
-        if (source) setDiscoverySource(source);
+        if (source) {
+            // Only allow source from URL if it's hdrezka OR if tmdb is available
+            if (source === 'hdrezka' || tmdbAvailable) {
+                setDiscoverySource(source);
+            } else {
+                setDiscoverySource('hdrezka');
+            }
+        }
 
         const inc = searchParams.get('inc')?.split(',').filter(Boolean) || [];
         const exc = searchParams.get('exc')?.split(',').filter(Boolean) || [];
@@ -104,7 +135,7 @@ export function DiscoveryProvider({ children }: { children: ReactNode }) {
         if (sortK && sortD) setSortState({ key: sortK, dir: sortD });
 
         setIsInitialized(true);
-    }, [searchParams, isInitialized]);
+    }, [searchParams, isInitialized, configLoaded, tmdbAvailable]);
 
     // — Sync State -> URL —
     useEffect(() => {
@@ -137,7 +168,7 @@ export function DiscoveryProvider({ children }: { children: ReactNode }) {
         if (newSearch !== currentSearch) {
             router.replace(`${pathname}?${newSearch}`, { scroll: false });
         }
-    }, [contentType, genreStates, activeLanguage, activeCountry, sortState, year, searchQuery, activeHdRezkaGenre, discoverySource, pathname, isInitialized, searchParams, router]);
+    }, [contentType, genreStates, activeLanguage, activeCountry, sortState, year, searchQuery, activeHdRezkaGenre, discoverySource, pathname, isInitialized, configLoaded, searchParams, router]);
 
     // — Helpers —
     const toggleGenre = (id: string | number) => {
@@ -174,7 +205,8 @@ export function DiscoveryProvider({ children }: { children: ReactNode }) {
         searchQuery, setSearchQuery: updateSearchQuery,
         activeHdRezkaGenre, setActiveHdRezkaGenre: updateHdRezkaGenre,
         discoverySource, setDiscoverySource,
-        isInitialized
+        isInitialized,
+        tmdbAvailable
     };
 
     return (

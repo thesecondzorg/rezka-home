@@ -20,7 +20,8 @@ export function ModernSidebar() {
         searchQuery, setSearchQuery,
         discoverySource, setDiscoverySource,
         activeHdRezkaGenre, setActiveHdRezkaGenre,
-        isInitialized
+        isInitialized,
+        tmdbAvailable
     } = useDiscovery();
 
     const [localSearch, setLocalSearch] = useState(searchQuery);
@@ -71,31 +72,33 @@ export function ModernSidebar() {
                 </section>
 
                 {/* Mode Selector */}
-                <section>
-                    <h3 className="sidebar-label mb-4">Discovery Source</h3>
-                    <div className="flex p-1 bg-gray-900/80 rounded-2xl border border-gray-800 ring-1 ring-white/5 shadow-inner">
-                        <button
-                            onClick={() => setDiscoverySource('tmdb')}
-                            className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all ${
-                                discoverySource === 'tmdb'
-                                    ? 'bg-red-600 text-white shadow-xl shadow-red-600/20'
-                                    : 'text-gray-500 hover:text-gray-300'
-                            }`}
-                        >
-                            TMDB
-                        </button>
-                        <button
-                            onClick={() => setDiscoverySource('hdrezka')}
-                            className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all ${
-                                discoverySource === 'hdrezka'
-                                    ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20'
-                                    : 'text-gray-500 hover:text-gray-300'
-                            }`}
-                        >
-                            HDRezka
-                        </button>
-                    </div>
-                </section>
+                {tmdbAvailable && (
+                    <section>
+                        <h3 className="sidebar-label mb-4">Discovery Source</h3>
+                        <div className="flex p-1 bg-gray-900/80 rounded-2xl border border-gray-800 ring-1 ring-white/5 shadow-inner">
+                            <button
+                                onClick={() => setDiscoverySource('tmdb')}
+                                className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all ${
+                                    discoverySource === 'tmdb'
+                                        ? 'bg-red-600 text-white shadow-xl shadow-red-600/20'
+                                        : 'text-gray-500 hover:text-gray-300'
+                                }`}
+                            >
+                                TMDB
+                            </button>
+                            <button
+                                onClick={() => setDiscoverySource('hdrezka')}
+                                className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all ${
+                                    discoverySource === 'hdrezka'
+                                        ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20'
+                                        : 'text-gray-500 hover:text-gray-300'
+                                }`}
+                            >
+                                HDRezka
+                            </button>
+                        </div>
+                    </section>
+                )}
 
                 {/* Content Type / Categories — Always visible as they are core */}
                 <section>

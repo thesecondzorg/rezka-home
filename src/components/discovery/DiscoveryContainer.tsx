@@ -53,7 +53,6 @@ export function DiscoveryContainer({
     const [loading, setLoading] = useState(false);
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
-    const [noApiKey, setNoApiKey] = useState(false);
     const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
     const [linkingCandidates, setLinkingCandidates] = useState<LinkingCandidates | null>(null);
 
@@ -102,8 +101,9 @@ export function DiscoveryContainer({
         const res = await fetch(`/api/tmdb-discover?${params.toString()}`);
         const data = await res.json();
 
-        if (data.error === 'TMDB_API_KEY is not configured') {
-            setNoApiKey(true);
+        if (data.error) {
+            console.warn('TMDB Discover Error:', data.error);
+            setHasMore(false);
             return;
         }
 
@@ -134,13 +134,20 @@ export function DiscoveryContainer({
             fetchUrl = `/api/hdrezka-catalog?path=${encodeURIComponent(path)}`;
         } else {
             // Priority 2: Searching or Year filtering (Global rezka logic)
-            if (!debouncedQuery.trim() && year === '0') {
-                 setResults([]);
-                 setHasMore(false);
-                 return;
-            }
             const query = debouncedQuery.trim() || year;
-            fetchUrl = `/api/search?q=${encodeURIComponent(query)}`;
+            
+            if (!debouncedQuery.trim() && year === '0') {
+                 // Priority 3: Default "Latest" path for the selection category
+                 const defaultPaths: Record<string, string> = {
+                    'movie': '/films/',
+                    'tv': '/series/',
+                    'cartoons': '/cartoons/',
+                    'anime': '/anime/'
+                 };
+                 fetchUrl = `/api/hdrezka-catalog?path=${encodeURIComponent(defaultPaths[contentType] || '/films/')}`;
+            } else {
+                 fetchUrl = `/api/search?q=${encodeURIComponent(query)}`;
+            }
         }
 
         const res = await fetch(fetchUrl);
@@ -328,12 +335,12 @@ export function DiscoveryContainer({
         setLinkingCandidates(null);
     };
 
-    if (noApiKey) {
+
+    if (!isInitialized) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
-                <div className="text-5xl">🔑</div>
-                <h2 className="text-2xl font-bold text-white">TMDB API Key Missing</h2>
-                <p className="text-gray-400 max-w-md">Add a TMDB API key to your configuration to enable discovery.</p>
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+                <div className="w-12 h-12 border-4 border-gray-800 border-t-red-500 rounded-full animate-spin" />
+                <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Initializing Discovery...</p>
             </div>
         );
     }

@@ -6,11 +6,13 @@ import Link from 'next/link';
 import Hls from 'hls.js';
 import { MovieInfo } from '@/components/movie/MovieInfo';
 import { MovieHeader } from '@/components/movie/MovieHeader';
+import { useDiscovery } from '@/context/DiscoveryContext';
 
 
 function MoviePageContent() {
     const searchParams = useSearchParams();
     const url = searchParams.get('url');
+    const { tmdbAvailable } = useDiscovery();
 
     const [details, setDetails] = useState<any>(null);
     const [tmdbData, setTmdbData] = useState<any>(null);
@@ -52,7 +54,7 @@ function MoviePageContent() {
         if (url) {
             fetchDetails(url);
 
-            if (tmdbId) {
+            if (tmdbId && tmdbAvailable) {
                 fetch(`/api/tmdb-details?id=${tmdbId}&type=${tmdbType}`)
                     .then(res => res.json())
                     .then(data => {
