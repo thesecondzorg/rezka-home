@@ -13,6 +13,7 @@ export interface UnifiedResult {
     type: 'movie' | 'tv' | 'series' | string;
     url?: string; // For potential direct links if we ever scrape again
     genreIds?: number[];
+    info?: string;
 }
 
 export interface DiscoveryFilters {

@@ -104,8 +104,8 @@ export function ResultsGrid({ results, loading, onCardClick, linkingId }: Result
                         {result.originalTitle && result.originalTitle !== result.title && (
                             <p className="text-[10px] text-gray-600 line-clamp-1">{result.originalTitle}</p>
                         )}
-                        {!result.originalTitle && result.genres && (
-                            <p className="text-[10px] text-gray-600 line-clamp-1">{result.genres}</p>
+                        {!result.originalTitle && result.info && (
+                            <p className="text-[10px] text-gray-600 line-clamp-1">{result.info}</p>
                         )}
                     </div>
                 </button>
