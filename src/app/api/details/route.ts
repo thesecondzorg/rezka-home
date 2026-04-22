@@ -66,6 +66,64 @@ export async function GET(request: Request) {
             }
         });
 
+        // Extract Related content (parts/sequels)
+        // Extract Related content (franchise parts from partcontent)
+        const related: any[] = [];
+        $('.b-post__partcontent_item').each((i, el) => {
+            const item = $(el);
+            const url = item.attr('data-url') || item.find('.td.title a').attr('href');
+            const title = item.find('.td.title').text().trim();
+            const year = item.find('.td.year').text().trim();
+            const rating = item.find('.td.rating').text().trim();
+
+            if (title) {
+                related.push({
+                    title,
+                    url: url && (url.startsWith('/') || url.startsWith('http')) ? url : null,
+                    year,
+                    rating: rating === '—' ? null : rating,
+                    isCurrent: item.hasClass('current')
+                });
+            }
+        });
+
+        // Extract Recommendations
+        const recommendations: any[] = [];
+        $('.b-post__mixed_list .b-content__inline_item').each((i, el) => {
+            recommendations.push({
+                title: $(el).find('.b-content__inline_item-link a').text().trim(),
+                url: $(el).find('.b-content__inline_item-link a').attr('href'),
+                poster: $(el).find('img').attr('src'),
+                info: $(el).find('.b-content__inline_item-link div').text().trim()
+            });
+            // Sanitize recommendations
+            const lastRec = recommendations[recommendations.length - 1];
+            if (lastRec && lastRec.url && !lastRec.url.startsWith('/') && !lastRec.url.startsWith('http')) {
+                recommendations.pop();
+            }
+        });
+
+        // Extract Schedule
+        const schedule: any[] = [];
+        $('.b-post__schedule_block .b-post__schedule_table tr').each((i, el) => {
+            // Use .td-4 for date in current-episode rows, fallback to .td-1
+            const isCurrent = $(el).hasClass('current-episode');
+            const date = (isCurrent ? $(el).find('.td-4').text().trim() : '') || $(el).find('.td-1').text().trim();
+            let episode = $(el).find('.td-2').text().trim();
+            const status = $(el).find('.td-3').text().trim();
+
+            // Clean episode name: remove Cyrillic characters to leave only English/Latin
+            // Example: "НаутроThe Morrow" -> "The Morrow"
+            if (episode) {
+                // Remove all Cyrillic characters
+                episode = episode.replace(/[а-яА-ЯёЁ]/g, '').trim();
+            }
+
+            if (date && episode) {
+                schedule.push({ date, episode, status });
+            }
+        });
+
         // Extract translation options
         const translations: Array<{ id: string, name: string, movieId?: string, flag?: string }> = [];
         $('.b-translator__item').each((i, el) => {
@@ -147,7 +205,10 @@ export async function GET(request: Request) {
             translations,
             seasons,
             episodes,
-            movieId
+            movieId,
+            related,
+            recommendations,
+            schedule
         };
 
         // Cache successful result

@@ -8,6 +8,8 @@ interface ResultsGridProps {
     loading: boolean;
     onCardClick: (result: UnifiedResult) => void;
     linkingId: string | number | null;
+    hasMore?: boolean;
+    onLoadMore?: () => void;
 }
 
 const STAR_ICON = (
@@ -16,10 +18,10 @@ const STAR_ICON = (
     </svg>
 );
 
-export function ResultsGrid({ results, loading, onCardClick, linkingId }: ResultsGridProps) {
+export function ResultsGrid({ results, loading, onCardClick, linkingId, hasMore = false, onLoadMore }: ResultsGridProps) {
     const ratingColor = (r: number) => {
         if (r >= 7.5) return 'text-emerald-400';
-        if (r >= 6)   return 'text-yellow-400';
+        if (r >= 6) return 'text-yellow-400';
         return 'text-gray-400';
     };
 
@@ -34,6 +36,7 @@ export function ResultsGrid({ results, loading, onCardClick, linkingId }: Result
     }
 
     return (
+        <>
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {results.map((result, i) => (
                 <button
@@ -111,7 +114,7 @@ export function ResultsGrid({ results, loading, onCardClick, linkingId }: Result
                 </button>
             ))}
 
-            {/* Loading skeleton */}
+            {/* Loading skeleton cards */}
             {loading && results.length === 0 && (
                 Array.from({ length: 12 }).map((_, i) => (
                     <div key={i} className="flex flex-col bg-gray-900 rounded-xl overflow-hidden border border-gray-800 animate-pulse">
@@ -124,5 +127,24 @@ export function ResultsGrid({ results, loading, onCardClick, linkingId }: Result
                 ))
             )}
         </div>
+
+        {/* Pagination row */}
+        {loading && results.length > 0 && (
+            <div className="flex justify-center py-8">
+                <div className="w-8 h-8 border-2 border-gray-700 border-t-red-500 rounded-full animate-spin" />
+            </div>
+        )}
+
+        {hasMore && !loading && results.length > 0 && (
+            <div className="flex justify-center mt-4 mb-8">
+                <button
+                    onClick={onLoadMore}
+                    className="px-8 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-white text-sm font-semibold rounded-xl transition-all"
+                >
+                    Load More
+                </button>
+            </div>
+        )}
+        </>
     );
 }

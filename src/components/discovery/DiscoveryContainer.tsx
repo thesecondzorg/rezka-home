@@ -52,6 +52,7 @@ export function DiscoveryContainer({
     const [results, setResults] = useState<UnifiedResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [page, setPage] = useState(1);
+    const [hdrezkaPage, setHdrezkaPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
     const [linkingCandidates, setLinkingCandidates] = useState<LinkingCandidates | null>(null);
@@ -124,29 +125,30 @@ export function DiscoveryContainer({
         setPage(pageNum + 1);
     };
 
-    const doFetchHdrezka = async (reset: boolean) => {
+    const doFetchHdrezka = async (pageNum: number, reset: boolean) => {
         let fetchUrl = '';
-        
+        const isCatalogBrowse = activeHdRezkaGenre || (!debouncedQuery.trim() && year === '0');
+
         if (activeHdRezkaGenre) {
             // Priority 1: Browsing specific subcategory/genre
             let path = activeHdRezkaGenre;
             if (year !== '0') path += `${year}/`;
-            fetchUrl = `/api/hdrezka-catalog?path=${encodeURIComponent(path)}`;
+            fetchUrl = `/api/hdrezka-catalog?path=${encodeURIComponent(path)}&page=${pageNum}`;
         } else {
             // Priority 2: Searching or Year filtering (Global rezka logic)
             const query = debouncedQuery.trim() || year;
-            
+
             if (!debouncedQuery.trim() && year === '0') {
-                 // Priority 3: Default "Latest" path for the selection category
-                 const defaultPaths: Record<string, string> = {
+                // Priority 3: Default "Latest" path for the selection category
+                const defaultPaths: Record<string, string> = {
                     'movie': '/films/',
                     'tv': '/series/',
                     'cartoons': '/cartoons/',
                     'anime': '/anime/'
-                 };
-                 fetchUrl = `/api/hdrezka-catalog?path=${encodeURIComponent(defaultPaths[contentType] || '/films/')}`;
+                };
+                fetchUrl = `/api/hdrezka-catalog?path=${encodeURIComponent(defaultPaths[contentType] || '/films/')}&page=${pageNum}`;
             } else {
-                 fetchUrl = `/api/search?q=${encodeURIComponent(query)}`;
+                fetchUrl = `/api/search?q=${encodeURIComponent(query)}`;
             }
         }
 
@@ -154,7 +156,7 @@ export function DiscoveryContainer({
         const data = await res.json();
 
         let finalResults = data.results || [];
-        
+
         // Filter by contentType (Mapping "Series" to "Сериал" etc)
         const singularMap: Record<string, string> = {
             'movie': 'Фильм',
@@ -163,11 +165,11 @@ export function DiscoveryContainer({
             'anime': 'Аниме'
         };
         const searchKeyword = singularMap[contentType];
-        
+
         const isSearching = !!debouncedQuery.trim();
 
-        // Skip post-fetch category filtering if searching by title, as requested.
-        // Otherwise, filter results by the mapped category keyword (e.g. "Сериал").
+        // Skip post-fetch category filtering if searching by title.
+        // Otherwise, filter by mapped category keyword (e.g. "Сериал").
         if (searchKeyword && !activeHdRezkaGenre && !isSearching) {
             finalResults = finalResults.filter((r: any) => {
                 const cat = (r.category || r.info || '').toLowerCase();
@@ -184,37 +186,50 @@ export function DiscoveryContainer({
             url: r.url
         }));
 
-        setResults(unified);
-        setHasMore(false); // Search/Catalog API usually isn't paginated the same way in this context
+        setResults(prev => reset ? unified : [...prev, ...unified]);
+
+        // Pagination: catalog pages support next page; search results do not.
+        // The API returns nextPage=null only when it's certain there are no more pages.
+        if (isCatalogBrowse && data.nextPage != null) {
+            setHasMore(true);
+            setHdrezkaPage(data.nextPage);
+        } else if (isCatalogBrowse && unified.length >= 32) {
+            // Fallback: full page returned but API couldn't detect next — assume page+1
+            setHasMore(true);
+            setHdrezkaPage(pageNum + 1);
+        } else {
+            setHasMore(false);
+        }
     };
 
-    const doFetch = useCallback(async (pageNum: number, reset: boolean) => {
+    const doFetch = useCallback(async (pageNum: number, reset: boolean, hdPageNum?: number) => {
         if (!isInitialized) return;
         setLoading(true);
         try {
             if (discoverySource === 'tmdb') {
                 await doFetchTmdb(pageNum, reset);
             } else {
-                await doFetchHdrezka(reset);
+                await doFetchHdrezka(hdPageNum ?? hdrezkaPage, reset);
             }
         } catch (err) {
             console.error('Discover fetch error:', err);
         } finally {
             setLoading(false);
         }
-    }, [contentType, genreStates, activeLanguage, activeCountry, sortState, year, debouncedQuery, discoverySource, activeHdRezkaGenre, getSortValue, isInitialized]);
+    }, [contentType, genreStates, activeLanguage, activeCountry, sortState, year, debouncedQuery, discoverySource, activeHdRezkaGenre, getSortValue, isInitialized, hdrezkaPage]);
 
     // Re-fetch from page 1 when any filter changes
     useEffect(() => {
         if (!isInitialized) return;
         setResults([]);
         setPage(1);
+        setHdrezkaPage(1);
         setHasMore(true);
-        doFetch(1, true);
+        doFetch(1, true, 1);
     }, [contentType, genreStates, activeLanguage, activeCountry, sortState, year, debouncedQuery, discoverySource, activeHdRezkaGenre, isInitialized]);
 
     const handleCardClick = async (result: UnifiedResult) => {
-        if (linkingId) return; 
+        if (linkingId) return;
 
         // If from HDRezka mode, we already have the URL!
         if (discoverySource === 'hdrezka') {
@@ -223,16 +238,16 @@ export function DiscoveryContainer({
         }
 
         setLinkingId(result.id);
-        
+
         try {
             const detailRes = await fetch(`/api/tmdb-details?id=${result.id}&type=${result.type}`);
             const detail = await detailRes.json();
-            
+
             if (detail.error) {
                 console.warn('TMDB linking failed for this item:', detail.error);
-                setLinkingCandidates({ 
-                    tmdbData: { title: result.title, type: result.type, tmdbId: result.id, poster: result.poster || undefined }, 
-                    results: [] 
+                setLinkingCandidates({
+                    tmdbData: { title: result.title, type: result.type, tmdbId: result.id, poster: result.poster || undefined },
+                    results: []
                 });
                 return;
             }
@@ -291,7 +306,7 @@ export function DiscoveryContainer({
                 // 3. Category Match (Mapping TMDB types to Russian categories)
                 const isTv = result.type === 'tv' || result.type === 'anime'; // Anime logic often series
                 const resIsSeries = resInfo.includes('сериал') || resInfo.includes('аниме') || resInfo.includes('мультсериал');
-                
+
                 if (isTv && resIsSeries) score += 5;
                 else if (!isTv && !resIsSeries) score += 5;
 
@@ -319,9 +334,9 @@ export function DiscoveryContainer({
         } catch (err) {
             console.error('Linking error:', err);
             // On hard error, we show the selection modal with 0 results to notify user
-            setLinkingCandidates({ 
-                tmdbData: { title: result.title, type: result.type, tmdbId: result.id, poster: result.poster || undefined }, 
-                results: [] 
+            setLinkingCandidates({
+                tmdbData: { title: result.title, type: result.type, tmdbId: result.id, poster: result.poster || undefined },
+                results: []
             });
         } finally {
             setLinkingId(null);
@@ -360,29 +375,14 @@ export function DiscoveryContainer({
                     loading={loading}
                     onCardClick={handleCardClick}
                     linkingId={linkingId}
+                    hasMore={hasMore}
+                    onLoadMore={() => discoverySource === 'tmdb' ? doFetch(page, false) : doFetch(page, false, hdrezkaPage)}
                 />
-
-                {loading && results.length > 0 && (
-                    <div className="flex justify-center py-8">
-                        <div className="w-8 h-8 border-2 border-gray-700 border-t-red-500 rounded-full animate-spin" />
-                    </div>
-                )}
-
-                {hasMore && !loading && results.length > 0 && (
-                    <div className="flex justify-center mt-4 mb-8">
-                        <button
-                            onClick={() => doFetch(page, false)}
-                            className="px-8 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-white text-sm font-semibold rounded-xl transition-all"
-                        >
-                            Load More
-                        </button>
-                    </div>
-                )}
             </div>
 
             {/* Selection Modal Overlay */}
             {linkingCandidates && (
-                <LinkingChoiceModal 
+                <LinkingChoiceModal
                     tmdbData={linkingCandidates.tmdbData}
                     results={linkingCandidates.results}
                     onSelect={handleCandidateSelect}

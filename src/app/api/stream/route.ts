@@ -97,7 +97,13 @@ export async function GET(request: Request) {
             const parsedStreams = json.url.split(',').map((s: string) => {
                 const match = s.match(/\[(.*?)\](.*)/);
                 if (match) {
-                    const quality = match[1]; // e.g. "1080p", "720p"
+                    let quality = match[1]; // e.g. "1080p", "1080p Ultra", "2K"
+                    
+                    // Strip HTML from quality (HDRezka sometimes puts spans for premium qualities)
+                    if (quality.includes('<')) {
+                        quality = quality.replace(/<[^>]*>/g, '').trim();
+                    }
+                    
                     const urlsString = match[2];
 
                     let url = '';
@@ -118,8 +124,20 @@ export async function GET(request: Request) {
                     }
 
                     // Extract numeric resolution for sorting (e.g. 1080)
+                    let resolutionLevel = 0;
                     const resMatch = quality.match(/(\d+)p/);
-                    const resolutionLevel = resMatch ? parseInt(resMatch[1], 10) : 0;
+                    if (resMatch) {
+                        resolutionLevel = parseInt(resMatch[1], 10);
+                    } else if (quality.toUpperCase().includes('4K')) {
+                        resolutionLevel = 2160;
+                    } else if (quality.toUpperCase().includes('2K')) {
+                        resolutionLevel = 1440;
+                    }
+
+                    // Fallback for unknown labels to ensure they are at least included
+                    if (resolutionLevel === 0 && quality.trim()) {
+                        resolutionLevel = 720; 
+                    }
 
                     return { quality, url, hlsUrl, resolutionLevel };
                 }

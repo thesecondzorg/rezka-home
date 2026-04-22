@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     try {
         // Fetch details AND external IDs one call if possible, or two.
         // Actually /movie/{id}?append_to_response=external_ids is best.
-        const url = `${TMDB_BASE}/${type}/${id}?api_key=${apiKey}&append_to_response=external_ids`;
+        const url = `${TMDB_BASE}/${type}/${id}?api_key=${apiKey}&append_to_response=external_ids,recommendations,similar`;
         
         const res = await fetch(url, {
             headers: { 'User-Agent': userAgent },
@@ -55,7 +55,32 @@ export async function GET(request: Request) {
             backdropPath: data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null,
             genres: data.genres?.map((g: any) => g.name) || [],
             rating: data.vote_average ? Math.round(data.vote_average * 10) / 10 : null,
-            voteCount: data.vote_count || 0
+            voteCount: data.vote_count || 0,        
+            recommendations: (() => {
+                const recs = data.recommendations?.results || [];
+                const similar = data.similar?.results || [];
+                const combined = [...recs, ...similar];
+                
+                // De-duplicate by ID
+                const seen = new Set();
+                return combined.filter((r: any) => {
+                    if (seen.has(r.id)) return false;
+                    seen.add(r.id);
+                    return true;
+                }).map((r: any) => ({
+                    id: r.id,
+                    title: r.title || r.name,
+                    posterPath: r.poster_path ? `https://image.tmdb.org/t/p/w500${r.poster_path}` : null,
+                    year: (r.release_date || r.first_air_date || '').slice(0, 4),
+                    type: r.media_type || (r.title ? 'movie' : 'tv')
+                }));
+            })(),
+            nextEpisode: data.next_episode_to_air ? {
+                airDate: data.next_episode_to_air.air_date,
+                episodeNumber: data.next_episode_to_air.episode_number,
+                seasonNumber: data.next_episode_to_air.season_number,
+                name: data.next_episode_to_air.name
+            } : null
         });
 
     } catch (err) {
